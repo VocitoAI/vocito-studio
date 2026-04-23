@@ -12,10 +12,17 @@ export const maxDuration = 60;
 
 // Pre-compute the JSON Schema from Zod at module level
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const scenePlanJsonSchema = zodToJsonSchema(ScenePlanSchema as any, {
-  target: "openApi3",
+const rawSchema = zodToJsonSchema(ScenePlanSchema as any, {
+  target: "jsonSchema7",
   $refStrategy: "none",
 });
+
+// Strip $schema (Anthropic rejects it) and ensure type: "object" at root
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { $schema: _, ...scenePlanJsonSchema } = rawSchema as any;
+if (!scenePlanJsonSchema.type) {
+  scenePlanJsonSchema.type = "object";
+}
 
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabase();
