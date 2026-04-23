@@ -1,0 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "worker/Dockerfile"
+watchPatterns = ["worker/**"]
+
+[deploy]
+startCommand = "python main.py"
