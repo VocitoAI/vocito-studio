@@ -34,6 +34,7 @@ export default function NewVideoPage() {
   const [language, setLanguage] = useState<"en" | "nl" | "de">("en");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [debugIssues, setDebugIssues] = useState<unknown[] | null>(null);
   const router = useRouter();
 
   const handleSubmit = async () => {
@@ -41,6 +42,7 @@ export default function NewVideoPage() {
 
     setLoading(true);
     setError("");
+    setDebugIssues(null);
 
     try {
       const res = await fetch("/api/plan", {
@@ -52,6 +54,9 @@ export default function NewVideoPage() {
       const data = await res.json();
 
       if (!res.ok) {
+        if (data.issues) {
+          setDebugIssues(data.issues);
+        }
         throw new Error(data.error || "Failed to create plan");
       }
 
@@ -138,6 +143,15 @@ export default function NewVideoPage() {
             {error && (
               <div className="mt-4 p-3 rounded-lg bg-destructive-subtle border border-destructive/30 text-sm text-destructive">
                 {error}
+              </div>
+            )}
+
+            {debugIssues && (
+              <div className="mt-4 p-3 rounded-lg bg-ui border border-border">
+                <p className="label-mono mb-2">VALIDATION ISSUES</p>
+                <pre className="text-xs font-mono text-foreground-muted overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
+                  {JSON.stringify(debugIssues, null, 2)}
+                </pre>
               </div>
             )}
           </CardContent>
