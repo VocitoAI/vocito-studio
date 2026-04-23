@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { createServerSupabase } from "@/lib/supabase/server";
 import {
   SCENE_PLAN_SYSTEM_PROMPT,
@@ -8,6 +9,13 @@ import {
 import { ScenePlanSchema } from "@/types/scenePlan";
 
 export const maxDuration = 60;
+
+// Pre-compute the JSON Schema from Zod at module level
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const scenePlanJsonSchema = zodToJsonSchema(ScenePlanSchema as any, {
+  target: "openApi3",
+  $refStrategy: "none",
+});
 
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabase();
@@ -50,15 +58,24 @@ export async function POST(request: NextRequest) {
 
     promptId = promptRecord.id;
 
-    // Call Claude API
+    // Call Claude API with tool use for structured output
     const anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY!,
     });
 
     const response = await anthropic.messages.create({
       model: "claude-opus-4-7",
-      max_tokens: 8000,
+      max_tokens: 16000,
       system: SCENE_PLAN_SYSTEM_PROMPT,
+      tools: [
+        {
+          name: "generate_scene_plan",
+          description:
+            "Generate a complete ScenePlan for a Vocito launch video. Every field in the schema is REQUIRED unless marked optional. Enums must be used EXACTLY as specified. uiElements must be objects with type/content/animationIn/showFromFrame/showUntilFrame.",
+          input_schema: scenePlanJsonSchema as Anthropic.Tool.InputSchema,
+        },
+      ],
+      tool_choice: { type: "tool", name: "generate_scene_plan" },
       messages: [
         {
           role: "user",
@@ -67,71 +84,47 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    // Extract text from response
-    const textContent = response.content.find((b) => b.type === "text");
-    if (!textContent || textContent.type !== "text") {
-      throw new Error("No text content in Claude response");
+    // Extract tool use result
+    const toolUseBlock = response.content.find((b) => b.type === "tool_use");
+    if (!toolUseBlock || toolUseBlock.type !== "tool_use") {
+      const rawContent = JSON.stringify(response.content).slice(0, 500);
+      console.error(
+        "[/api/plan] Claude did not use tool. Response:",
+        rawContent
+      );
+
+      await supabase
+        .from("studio_prompts")
+        .update({
+          status: "plan_rejected",
+          notes: `Claude did not use generate_scene_plan tool. Response: ${rawContent}`,
+        })
+        .eq("id", promptId);
+
+      return NextResponse.json(
+        {
+          error: "Claude did not use the generate_scene_plan tool",
+          promptId,
+        },
+        { status: 500 }
+      );
     }
 
-    const rawText = textContent.text;
+    const scenePlanJson = toolUseBlock.input;
     console.log(
-      "[/api/plan] Claude raw output (first 500 chars):",
-      rawText.slice(0, 500)
+      "[/api/plan] Tool use received, validating with Zod..."
     );
 
-    // Parse JSON
-    let scenePlanJson;
-    try {
-      scenePlanJson = JSON.parse(rawText);
-    } catch (parseError) {
-      // Try stripping markdown fences
-      const cleaned = rawText
-        .replace(/^```(?:json)?\n?/, "")
-        .replace(/\n?```$/, "")
-        .trim();
-
-      try {
-        scenePlanJson = JSON.parse(cleaned);
-      } catch {
-        // JSON is completely unparseable — log raw text for debugging
-        const errorNote = `JSON parse failed. Raw output (first 1000 chars): ${rawText.slice(0, 1000)}`;
-        console.error("[/api/plan] JSON parse error:", parseError);
-        console.error("[/api/plan] Raw Claude output:", rawText.slice(0, 1000));
-
-        await supabase
-          .from("studio_prompts")
-          .update({
-            status: "plan_rejected",
-            notes: errorNote,
-          })
-          .eq("id", promptId);
-
-        return NextResponse.json(
-          {
-            error: "Claude returned invalid JSON",
-            promptId,
-            debug: rawText.slice(0, 300),
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Validate against Zod schema
+    // Validate with Zod (belt-and-suspenders — tool use should match schema)
     const parsed = ScenePlanSchema.safeParse(scenePlanJson);
     if (!parsed.success) {
       const issues = parsed.error.issues;
       const issuesJson = JSON.stringify(issues, null, 2);
 
-      console.error("[/api/plan] Zod validation failed. Issues:");
+      console.error("[/api/plan] Zod validation failed despite tool use:");
       console.error(issuesJson);
-      console.error(
-        "[/api/plan] Claude raw output (first 500 chars):",
-        rawText.slice(0, 500)
-      );
 
-      // Save full issues to Supabase notes (up to 5000 chars)
-      const notesContent = `Schema validation failed.\n\nIssues:\n${issuesJson.slice(0, 4000)}\n\nRaw output (first 500 chars):\n${rawText.slice(0, 500)}`;
+      const notesContent = `Tool use validation failed.\n\nIssues:\n${issuesJson.slice(0, 4000)}`;
 
       await supabase
         .from("studio_prompts")
@@ -143,7 +136,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json(
         {
-          error: "Claude generated invalid ScenePlan",
+          error: "ScenePlan validation failed",
           promptId,
           issues,
         },
@@ -174,7 +167,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[/api/plan] Unhandled error:", error);
 
-    // Try to save error to Supabase if we have a prompt ID
     if (promptId) {
       try {
         await supabase
@@ -185,7 +177,7 @@ export async function POST(request: NextRequest) {
           })
           .eq("id", promptId);
       } catch {
-        // Don't let this secondary save fail the response
+        // Don't let secondary save fail the response
       }
     }
 

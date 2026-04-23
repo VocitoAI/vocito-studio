@@ -69,7 +69,7 @@ For each scene, provide a concise "reasoning" field (1-2 sentences) explaining w
 The user is Keanu, Vocito's founder. He is Dutch, bilingual (NL/EN), and prefers direct communication. His benchmark is PolyAI, Apple, Linear. Don't compromise on polish.
 
 # Output format
-Output MUST be valid JSON matching the ScenePlan TypeScript type. Start with \`{\` and end with \`}\`. No preamble, no explanation outside the JSON, no markdown.`;
+CRITICAL: Use the generate_scene_plan tool. Every field in the schema is REQUIRED unless marked optional. Enums must be used EXACTLY as specified (no synonyms, no variations). uiElements must be objects with type/content/animationIn/showFromFrame/showUntilFrame — never plain strings. All literal values (brand name, colors, fps, totalFrames, etc.) must match EXACTLY.`;
 
 export function buildUserMessage(params: {
   rawPrompt: string;
