@@ -1,103 +1,56 @@
-"use client";
+import { SettingsContent } from "@/components/app/settings-content";
 
-import { motion } from "framer-motion";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+async function getHealthChecks() {
+  const defaultChecks = {
+    database: false,
+    anthropic: false,
+    fish_audio: false,
+    epidemic_sound: false,
+    worker: false,
+  };
 
-export default function SettingsPage() {
-  return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <div className="mb-8">
-          <h1 className="font-display text-5xl mb-2">Settings</h1>
-          <p className="text-foreground-muted">
-            Configure Studio and your workflow preferences.
-          </p>
-        </div>
+  try {
+    // Call health endpoint internally
+    const { createServerSupabase } = await import("@/lib/supabase/server");
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Workspace</CardTitle>
-              <CardDescription>
-                Your Vocito workspace identity.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Brand name
-                </label>
-                <Input defaultValue="Vocito" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Default language
-                </label>
-                <Input defaultValue="English" />
-              </div>
-            </CardContent>
-          </Card>
+    // Database check
+    try {
+      const supabase = createServerSupabase();
+      const { error } = await supabase
+        .from("studio_prompts")
+        .select("id")
+        .limit(1);
+      defaultChecks.database = !error;
+    } catch {
+      defaultChecks.database = false;
+    }
 
-          <Card>
-            <CardHeader>
-              <CardTitle>API Integrations</CardTitle>
-              <CardDescription>
-                Status of external services.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 font-mono text-sm">
-              <div className="flex items-center justify-between py-2 border-b border-border">
-                <span className="text-foreground-muted">Anthropic Claude</span>
-                <span className="text-success">Connected</span>
-              </div>
-              <div className="flex items-center justify-between py-2 border-b border-border">
-                <span className="text-foreground-muted">Fish Audio</span>
-                <span className="text-success">Connected</span>
-              </div>
-              <div className="flex items-center justify-between py-2 border-b border-border">
-                <span className="text-foreground-muted">Epidemic Sound</span>
-                <span className="text-success">Connected</span>
-              </div>
-              <div className="flex items-center justify-between py-2 border-b border-border">
-                <span className="text-foreground-muted">Supabase</span>
-                <span className="text-foreground-subtle">
-                  Pending (brief A3)
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-foreground-muted">Remotion</span>
-                <span className="text-foreground-subtle">
-                  Pending (brief A3)
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+    // Key format checks
+    defaultChecks.anthropic =
+      !!process.env.ANTHROPIC_API_KEY?.startsWith("sk-ant-");
+    defaultChecks.fish_audio = !!process.env.FISH_AUDIO_API_KEY;
+    defaultChecks.epidemic_sound = !!process.env.EPIDEMIC_SOUND_API_KEY;
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Danger Zone</CardTitle>
-              <CardDescription>Irreversible actions.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button variant="destructive" size="sm">
-                Clear all generated videos
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </motion.div>
-    </div>
-  );
+    // Worker check
+    const workerUrl = process.env.WORKER_URL;
+    if (workerUrl) {
+      try {
+        const res = await fetch(`${workerUrl}/health`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        defaultChecks.worker = res.ok;
+      } catch {
+        defaultChecks.worker = false;
+      }
+    }
+  } catch {
+    // Return defaults
+  }
+
+  return defaultChecks;
+}
+
+export default async function SettingsPage() {
+  const checks = await getHealthChecks();
+  return <SettingsContent checks={checks} />;
 }
