@@ -11,7 +11,7 @@ const titles: Record<string, string> = {
 
 export function Header() {
   const pathname = usePathname();
-  const title = titles[pathname] || "Studio";
+  const title = titles[pathname] || (pathname.startsWith("/plan/") ? "Plan Review" : "Studio");
 
   return (
     <header className="h-14 border-b border-border bg-background/50 backdrop-blur-xl sticky top-0 z-40 flex items-center px-8">
