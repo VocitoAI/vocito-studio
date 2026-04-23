@@ -24,10 +24,10 @@
   --color-destructive: #ff6b6b;
   --color-destructive-subtle: rgba(255, 107, 107, 0.1);
 
-  /* Font variables (set via next/font) */
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-serif: var(--font-instrument-serif);
+  /* Updated font variables */
+  --font-sans: "Satoshi", system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, "Courier New", monospace;
+  --font-serif: var(--font-fraunces), Georgia, serif;
 }
 
 * {
@@ -42,30 +42,18 @@ html, body {
 body {
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
-  font-feature-settings: "ss01", "ss02", "cv01", "cv11";
+  font-family: var(--font-sans);
+  font-feature-settings: "ss03", "ss04";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.011em;
 }
 
 /* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-hover);
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-hover); }
 
 /* Selection */
 ::selection {
@@ -73,11 +61,58 @@ body {
   color: var(--color-foreground);
 }
 
-/* Utility for serif headings */
+/* === TYPOGRAPHY SYSTEM === */
+
+/* Display heading — large headings */
+.font-display {
+  font-family: var(--font-serif);
+  font-variation-settings:
+    "opsz" 144,
+    "SOFT" 50,
+    "WONK" 1;
+  font-weight: 400;
+  letter-spacing: -0.028em;
+  line-height: 1;
+}
+
+/* Serif italic — editorial accent */
 .font-serif-italic {
-  font-family: var(--font-serif), Georgia, serif;
+  font-family: var(--font-serif);
   font-style: italic;
+  font-variation-settings:
+    "opsz" 144,
+    "SOFT" 100,
+    "WONK" 1;
+  font-weight: 400;
   letter-spacing: -0.02em;
+}
+
+/* Smaller serif (body-level) */
+.font-serif {
+  font-family: var(--font-serif);
+  font-variation-settings: "opsz" 16, "SOFT" 50, "WONK" 0;
+  font-weight: 400;
+}
+
+/* Mono (data, labels, code) */
+.font-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+
+/* Uppercase label utility */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-foreground-subtle);
+}
+
+/* Numeric tabular alignment */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Animation utilities */
@@ -91,15 +126,5 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.4s ease-out;
-}
-
-.animate-fade-up {
-  animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
+.animate-fade-in { animation: fade-in 0.4s ease-out; }
+.animate-fade-up { animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1); }

@@ -39,7 +39,9 @@ export default function LoginPage() {
         className="w-full max-w-sm"
       >
         <div className="text-center mb-8">
-          <h1 className="font-serif-italic text-4xl mb-2">Vocito Studio</h1>
+          <h1 className="font-display text-5xl mb-2">
+            Vocito <span className="font-serif-italic">Studio</span>
+          </h1>
           <p className="text-sm text-foreground-muted">
             Enter password to continue
           </p>

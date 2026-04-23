@@ -28,7 +28,7 @@ export default function VideoDetailPage() {
 
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-2">
-            <h1 className="font-serif-italic text-4xl">Video {params.id}</h1>
+            <h1 className="font-display text-4xl">Video {params.id}</h1>
             <Badge variant="success">Completed</Badge>
           </div>
           <p className="text-foreground-muted font-mono text-sm">

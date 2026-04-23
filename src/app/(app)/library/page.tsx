@@ -48,7 +48,7 @@ export default function LibraryPage() {
       >
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="font-serif-italic text-4xl mb-2">Library</h1>
+            <h1 className="font-display text-5xl mb-2">Library</h1>
             <p className="text-foreground-muted">
               All your generated videos, organized and searchable.
             </p>

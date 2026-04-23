@@ -44,7 +44,9 @@ export default function DashboardPage() {
       >
         {/* Hero */}
         <div className="mb-10">
-          <h1 className="font-serif-italic text-5xl mb-3">Welcome back.</h1>
+          <h1 className="font-display text-6xl mb-3 tracking-tight">
+            Welcome <span className="font-serif-italic">back.</span>
+          </h1>
           <p className="text-foreground-muted text-lg">
             Create premium video content with AI. Just describe what you want.
           </p>
@@ -81,11 +83,9 @@ export default function DashboardPage() {
                     <div className="p-1.5 rounded bg-ui">
                       <Icon className="h-3.5 w-3.5 text-foreground-muted" />
                     </div>
-                    <p className="text-xs text-foreground-muted uppercase tracking-wider font-mono">
-                      {stat.label}
-                    </p>
+                    <p className="label-mono">{stat.label}</p>
                   </div>
-                  <p className="text-3xl font-medium">{stat.value}</p>
+                  <p className="text-3xl font-medium tabular-nums">{stat.value}</p>
                 </CardContent>
               </Card>
             );

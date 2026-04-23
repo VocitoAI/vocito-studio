@@ -27,10 +27,8 @@ export function Sidebar() {
       {/* Logo */}
       <div className="px-6 py-6 border-b border-border">
         <Link href="/" className="block">
-          <h1 className="font-serif-italic text-2xl">Vocito</h1>
-          <p className="text-xs text-foreground-subtle font-mono mt-0.5">
-            STUDIO · BETA
-          </p>
+          <h1 className="font-display text-2xl">Vocito</h1>
+          <p className="label-mono mt-0.5">STUDIO · BETA</p>
         </Link>
       </div>
 

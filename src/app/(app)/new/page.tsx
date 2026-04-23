@@ -29,8 +29,9 @@ export default function NewVideoPage() {
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
         <div className="mb-8">
-          <h1 className="font-serif-italic text-4xl mb-2">
-            What do you want to create?
+          <h1 className="font-display text-5xl mb-2">
+            What do you <span className="font-serif-italic">want</span> to
+            create?
           </h1>
           <p className="text-foreground-muted">
             Describe your video in your own words. AI will turn it into a plan

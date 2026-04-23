@@ -20,7 +20,7 @@ export default function SettingsPage() {
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
         <div className="mb-8">
-          <h1 className="font-serif-italic text-4xl mb-2">Settings</h1>
+          <h1 className="font-display text-5xl mb-2">Settings</h1>
           <p className="text-foreground-muted">
             Configure Studio and your workflow preferences.
           </p>
