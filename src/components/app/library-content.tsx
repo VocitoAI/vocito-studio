@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { Sparkles, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -12,7 +12,8 @@ interface PromptRow {
   language: string;
   status: string;
   created_at: string;
-  scene_plan: Record<string, unknown> | null;
+  review_feedback: string | null;
+  notes: string | null;
 }
 
 function statusBadgeVariant(
@@ -57,6 +58,14 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function getRegeneratedFromId(notes: string | null): string | null {
+  if (!notes) return null;
+  const match = notes.match(
+    /Regenerated from rejected plan ([0-9a-f-]{36})/
+  );
+  return match ? match[1] : null;
+}
+
 export function LibraryContent({ prompts }: { prompts: PromptRow[] }) {
   return (
     <div className="p-8 max-w-7xl mx-auto">
@@ -69,7 +78,7 @@ export function LibraryContent({ prompts }: { prompts: PromptRow[] }) {
           <div>
             <h1 className="font-display text-5xl mb-2">Library</h1>
             <p className="text-foreground-muted">
-              All your scene plans and generated videos.
+              {prompts.length} plan{prompts.length !== 1 ? "s" : ""} total
             </p>
           </div>
           <Link
@@ -96,35 +105,55 @@ export function LibraryContent({ prompts }: { prompts: PromptRow[] }) {
           </Card>
         ) : (
           <div className="grid gap-3">
-            {prompts.map((prompt) => (
-              <Link key={prompt.id} href={`/plan/${prompt.id}`}>
-                <Card
-                  className={`hover:border-border-hover transition-colors ${
-                    prompt.status === "plan_rejected"
-                      ? "opacity-60"
-                      : ""
-                  }`}
-                >
-                  <CardContent className="p-5 flex items-center gap-5">
-                    <div className="w-12 h-12 rounded-lg bg-ui shrink-0 flex items-center justify-center overflow-hidden">
-                      <Sparkles className="h-4 w-4 text-foreground-subtle" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-base truncate">
-                        {prompt.raw_prompt}
-                      </p>
-                      <p className="text-sm text-foreground-muted font-mono mt-1">
-                        {formatDate(prompt.created_at)} ·{" "}
-                        {prompt.language.toUpperCase()}
-                      </p>
-                    </div>
-                    <Badge variant={statusBadgeVariant(prompt.status)}>
-                      {statusLabel(prompt.status)}
-                    </Badge>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+            {prompts.map((prompt) => {
+              const regeneratedFrom = getRegeneratedFromId(prompt.notes);
+
+              return (
+                <Link key={prompt.id} href={`/plan/${prompt.id}`}>
+                  <Card
+                    className={`hover:border-border-hover transition-colors ${
+                      prompt.status === "plan_rejected" ? "opacity-50" : ""
+                    }`}
+                  >
+                    <CardContent className="p-5 flex items-center gap-5">
+                      <div className="w-12 h-12 rounded-lg bg-ui shrink-0 flex items-center justify-center">
+                        <Sparkles className="h-4 w-4 text-foreground-subtle" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-base truncate">
+                          {prompt.raw_prompt}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-sm text-foreground-muted font-mono">
+                            {formatDate(prompt.created_at)} ·{" "}
+                            {prompt.language.toUpperCase()}
+                          </p>
+                          {regeneratedFrom && (
+                            <span className="inline-flex items-center gap-1 text-xs text-foreground-subtle">
+                              <RefreshCw className="h-3 w-3" />
+                              regenerated
+                            </span>
+                          )}
+                        </div>
+                        {prompt.status === "plan_rejected" &&
+                          prompt.review_feedback && (
+                            <p className="text-xs text-foreground-subtle mt-1 truncate italic">
+                              &quot;
+                              {prompt.review_feedback.length > 80
+                                ? prompt.review_feedback.slice(0, 80) + "…"
+                                : prompt.review_feedback}
+                              &quot;
+                            </p>
+                          )}
+                      </div>
+                      <Badge variant={statusBadgeVariant(prompt.status)}>
+                        {statusLabel(prompt.status)}
+                      </Badge>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            })}
           </div>
         )}
       </motion.div>
