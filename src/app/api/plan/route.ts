@@ -9,6 +9,7 @@ import {
 import { ScenePlanSchema } from "@/types/scenePlan";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 // Pre-compute the JSON Schema from Zod at module level
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
