@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { createServerSupabase } from "@/lib/supabase/server";
 import {
   SCENE_PLAN_SYSTEM_PROMPT,
@@ -11,19 +11,11 @@ import { ScenePlanSchema } from "@/types/scenePlan";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// Pre-compute the JSON Schema from Zod at module level
+// Convert Zod v4 schema to JSON Schema using native toJSONSchema
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rawSchema = zodToJsonSchema(ScenePlanSchema as any, {
-  target: "jsonSchema7",
-  $refStrategy: "none",
-});
-
-// Strip $schema (Anthropic rejects it) and ensure type: "object" at root
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { $schema: _, ...scenePlanJsonSchema } = rawSchema as any;
-if (!scenePlanJsonSchema.type) {
-  scenePlanJsonSchema.type = "object";
-}
+const rawJsonSchema = z.toJSONSchema(ScenePlanSchema) as any;
+// Strip $schema (Anthropic rejects it)
+const { $schema: _, ...scenePlanJsonSchema } = rawJsonSchema;
 
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabase();
