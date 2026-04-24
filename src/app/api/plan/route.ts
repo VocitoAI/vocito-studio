@@ -138,12 +138,16 @@ export async function POST(request: NextRequest) {
 
     let scenePlanJson = toolUseBlock.input as Record<string, unknown>;
 
-    // Handle possible nesting from Claude
-    if (scenePlanJson.scene_plan && !scenePlanJson.meta) {
-      scenePlanJson = scenePlanJson.scene_plan as Record<string, unknown>;
-    }
-    if (scenePlanJson.input && !scenePlanJson.meta) {
-      scenePlanJson = scenePlanJson.input as Record<string, unknown>;
+    // Claude sometimes wraps output in a single key — unwrap it
+    if (!scenePlanJson.meta) {
+      const keys = Object.keys(scenePlanJson);
+      if (keys.length === 1) {
+        const inner = scenePlanJson[keys[0]];
+        if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+          scenePlanJson = inner as Record<string, unknown>;
+          console.log("[/api/plan] Unwrapped from key:", keys[0]);
+        }
+      }
     }
 
     // Validate with Zod (belt-and-suspenders — tool use should match schema)

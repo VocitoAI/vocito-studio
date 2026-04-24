@@ -129,11 +129,17 @@ export async function POST(
     console.log("[/api/plan/regenerate] Full input (first 1000 chars):", JSON.stringify(toolUseBlock.input).slice(0, 1000));
 
     let scenePlanJson = toolUseBlock.input as Record<string, unknown>;
-    if (scenePlanJson.scene_plan && !scenePlanJson.meta) {
-      scenePlanJson = scenePlanJson.scene_plan as Record<string, unknown>;
-    }
-    if (scenePlanJson.input && !scenePlanJson.meta) {
-      scenePlanJson = scenePlanJson.input as Record<string, unknown>;
+
+    // Claude sometimes wraps output in a single key — unwrap it
+    if (!scenePlanJson.meta) {
+      const keys = Object.keys(scenePlanJson);
+      if (keys.length === 1) {
+        const inner = scenePlanJson[keys[0]];
+        if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+          scenePlanJson = inner as Record<string, unknown>;
+          console.log("[/api/plan/regenerate] Unwrapped from key:", keys[0]);
+        }
+      }
     }
 
     const parsed = ScenePlanSchema.safeParse(scenePlanJson);
