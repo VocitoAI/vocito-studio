@@ -13,7 +13,26 @@ export const dynamic = "force-dynamic";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rawJsonSchema = z.toJSONSchema(ScenePlanSchema) as any;
-const { $schema: _, ...scenePlanJsonSchema } = rawJsonSchema;
+const { $schema: _, ...rawClean } = rawJsonSchema;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cleanSchemaForAnthropic(obj: any): any {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(cleanSchemaForAnthropic);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "additionalProperties") continue;
+    if (k === "const") {
+      result["enum"] = [v];
+      continue;
+    }
+    result[k] = cleanSchemaForAnthropic(v);
+  }
+  return result;
+}
+
+const scenePlanJsonSchema = cleanSchemaForAnthropic(rawClean);
 
 export async function POST(
   request: NextRequest,

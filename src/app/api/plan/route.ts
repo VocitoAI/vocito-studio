@@ -11,11 +11,31 @@ import { ScenePlanSchema } from "@/types/scenePlan";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// Convert Zod v4 schema to JSON Schema using native toJSONSchema
+// Convert Zod v4 schema to JSON Schema, then clean for Anthropic compatibility
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rawJsonSchema = z.toJSONSchema(ScenePlanSchema) as any;
-// Strip $schema (Anthropic rejects it)
-const { $schema: _, ...scenePlanJsonSchema } = rawJsonSchema;
+const { $schema: _, ...rawClean } = rawJsonSchema;
+
+// Anthropic tool use doesn't support "const" or "additionalProperties"
+// Convert const → enum[value], strip additionalProperties
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cleanSchemaForAnthropic(obj: any): any {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(cleanSchemaForAnthropic);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "additionalProperties") continue;
+    if (k === "const") {
+      result["enum"] = [v];
+      continue;
+    }
+    result[k] = cleanSchemaForAnthropic(v);
+  }
+  return result;
+}
+
+const scenePlanJsonSchema = cleanSchemaForAnthropic(rawClean);
 
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabase();
