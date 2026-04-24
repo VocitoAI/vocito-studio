@@ -33,7 +33,7 @@ type PlanRecord = {
 };
 
 export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
-  const [expandedScene, setExpandedScene] = useState<string | null>(null);
+  const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -196,22 +196,44 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
 
         {/* Scenes timeline */}
         <div className="mb-8">
-          <h2 className="font-display text-2xl mb-4">
-            Scenes{" "}
-            <span className="label-mono align-middle ml-2">
-              {scenePlan.scenes.length}/8
-            </span>
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-2xl">
+              Scenes{" "}
+              <span className="label-mono align-middle ml-2">
+                {scenePlan.scenes.length}/8
+              </span>
+            </h2>
+            <button
+              onClick={() => {
+                if (expandedScenes.size === scenePlan.scenes.length) {
+                  setExpandedScenes(new Set());
+                } else {
+                  setExpandedScenes(new Set(scenePlan.scenes.map((s) => s.id)));
+                }
+              }}
+              className="text-xs text-foreground-muted hover:text-foreground transition-colors font-mono"
+            >
+              {expandedScenes.size === scenePlan.scenes.length
+                ? "Collapse all"
+                : "Expand all"}
+            </button>
+          </div>
           <div className="space-y-2">
             {scenePlan.scenes.map((scene) => {
-              const isExpanded = expandedScene === scene.id;
+              const isExpanded = expandedScenes.has(scene.id);
               return (
                 <Card
                   key={scene.id}
                   className="cursor-pointer transition-colors hover:border-border-hover"
-                  onClick={() =>
-                    setExpandedScene(isExpanded ? null : scene.id)
-                  }
+                  onClick={() => {
+                    const next = new Set(expandedScenes);
+                    if (isExpanded) {
+                      next.delete(scene.id);
+                    } else {
+                      next.add(scene.id);
+                    }
+                    setExpandedScenes(next);
+                  }}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
