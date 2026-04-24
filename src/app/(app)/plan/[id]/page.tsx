@@ -2,6 +2,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { PlanReviewContent } from "@/components/app/plan-review-content";
 
+export const dynamic = "force-dynamic";
+
 async function getPlan(id: string) {
   const supabase = createServerSupabase();
   const { data, error } = await supabase

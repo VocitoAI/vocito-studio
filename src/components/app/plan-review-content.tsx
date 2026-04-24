@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -15,6 +15,7 @@ import {
   Mic,
   Volume2,
   Sparkles,
+  Check,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,8 @@ type PlanRecord = {
   status: string;
   review_feedback: string | null;
   created_at: string;
+  assets_status: string | null;
+  assets_error: string | null;
 };
 
 export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
@@ -38,6 +41,19 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
+
+  // Poll for asset status updates
+  useEffect(() => {
+    if (
+      plan.status === "plan_approved" &&
+      (plan.assets_status === "downloading" || plan.assets_status === "pending" || !plan.assets_status)
+    ) {
+      const interval = setInterval(() => {
+        router.refresh();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [plan.status, plan.assets_status, router]);
 
   const scenePlan = plan.scene_plan;
 
@@ -510,10 +526,49 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
 
         {isReviewed && plan.status === "plan_approved" && (
           <Card>
-            <CardContent className="p-5 text-center">
-              <p className="text-sm text-foreground-muted">
-                This plan was approved. Ready for rendering (coming in B3).
-              </p>
+            <CardContent className="p-5">
+              <p className="label-mono mb-3">ASSETS</p>
+
+              {(!plan.assets_status || plan.assets_status === "pending") && (
+                <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Waiting for asset resolution...</span>
+                </div>
+              )}
+
+              {plan.assets_status === "downloading" && (
+                <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>
+                    Searching Epidemic Sound for music and SFX...
+                  </span>
+                </div>
+              )}
+
+              {plan.assets_status === "ready" && (
+                <div className="flex items-center gap-2 text-sm text-success">
+                  <Check className="h-4 w-4" />
+                  <span>All assets ready. Rendering coming in B3.</span>
+                </div>
+              )}
+
+              {plan.assets_status === "partial" && (
+                <div className="text-sm text-foreground-muted">
+                  <p>Some assets resolved, others failed.</p>
+                  {plan.assets_error && (
+                    <p className="text-xs text-destructive mt-1">
+                      {plan.assets_error}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {plan.assets_status === "failed" && (
+                <div className="text-sm text-destructive">
+                  Asset resolution failed
+                  {plan.assets_error && `: ${plan.assets_error}`}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

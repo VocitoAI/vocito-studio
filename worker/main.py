@@ -1,17 +1,18 @@
 """
-Vocito Studio Worker
-Polls Supabase for pending video runs and processes them.
+Vocito Studio Worker — FastAPI + background polling.
 """
 import os
-import time
+import asyncio
 import logging
-from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-import json
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+import uvicorn
 from supabase import create_client, Client
+
 from services.supabase_queue import SupabaseQueue
+from services.asset_resolver import AssetResolver
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,104 +22,82 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "5"))
-PORT = int(os.environ.get("PORT", "8080"))
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "5"))
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+queue = SupabaseQueue(supabase)
+asset_resolver = AssetResolver(supabase)
 
 
-class HealthHandler(BaseHTTPRequestHandler):
-    """Simple health check HTTP server for Railway."""
-
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(
-                json.dumps({"status": "ok", "service": "vocito-studio-worker"}).encode()
-            )
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass  # Suppress default logging
-
-
-def start_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    logger.info(f"Health server running on port {PORT}")
-
-
-def process_job(job, queue):
-    """
-    Process a single video run job.
-    Placeholder — real logic comes in Brief B.
-    """
-    run_id = job["id"]
-
-    try:
-        queue.update_status(run_id, "planning", progress=10, step="Initializing")
-        time.sleep(2)
-
-        queue.update_status(run_id, "downloading", progress=30, step="Placeholder download")
-        time.sleep(2)
-
-        queue.update_status(run_id, "generating_vo", progress=50, step="Placeholder VO gen")
-        time.sleep(2)
-
-        queue.update_status(run_id, "rendering", progress=70, step="Placeholder render")
-        time.sleep(2)
-
-        queue.update_status(run_id, "uploading", progress=90, step="Placeholder upload")
-        time.sleep(2)
-
-        queue.update_status(
-            run_id,
-            "completed",
-            progress=100,
-            step="Done",
-            extra_fields={
-                "output_url": "https://example.com/placeholder.mp4",
-                "duration_seconds": 33.0,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        logger.info(f"Job {run_id} completed (placeholder)")
-
-    except Exception as e:
-        logger.error(f"Job {run_id} failed: {e}", exc_info=True)
-        queue.update_status(run_id, "failed", error_message=str(e))
-
-
-def main():
-    logger.info("Vocito Studio Worker starting...")
-
-    # Start health check server
-    start_health_server()
-
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    queue = SupabaseQueue(supabase)
-
-    logger.info("All clients initialized. Starting poll loop.")
-
+async def poll_loop():
+    """Background loop: poll for approved plans needing asset resolution."""
+    logger.info("Asset poll loop started")
     while True:
         try:
-            job = queue.fetch_next_pending()
+            # Check for approved plans needing assets
+            response = (
+                supabase.table("studio_prompts")
+                .select("id, scene_plan")
+                .eq("status", "plan_approved")
+                .is_("assets_status", "null")
+                .order("created_at", desc=False)
+                .limit(1)
+                .execute()
+            )
 
-            if job:
-                logger.info(f"Processing job {job['id']}")
-                process_job(job, queue)
-            else:
-                time.sleep(POLL_INTERVAL_SECONDS)
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
-            break
+            if response.data:
+                prompt = response.data[0]
+                prompt_id = prompt["id"]
+                logger.info(f"[poll] Found approved plan needing assets: {prompt_id}")
+
+                # Claim it
+                supabase.table("studio_prompts").update(
+                    {"assets_status": "downloading", "assets_started_at": "now()"}
+                ).eq("id", prompt_id).is_("assets_status", "null").execute()
+
+                await asset_resolver.resolve(prompt_id)
+
         except Exception as e:
-            logger.error(f"Poll loop error: {e}", exc_info=True)
-            time.sleep(POLL_INTERVAL_SECONDS)
+            logger.error(f"[poll] Error: {e}", exc_info=True)
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(poll_loop())
+    logger.info("Vocito Studio Worker started")
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Vocito Studio Worker", lifespan=lifespan)
+
+
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "ok", "service": "vocito-studio-worker"})
+
+
+@app.post("/webhooks/plan-approved")
+async def webhook_plan_approved(body: dict):
+    """Webhook from Next.js when a plan is approved. Triggers asset resolution."""
+    prompt_id = body.get("prompt_id")
+    if not prompt_id:
+        return JSONResponse({"error": "prompt_id required"}, status_code=400)
+
+    logger.info(f"[webhook] Plan approved: {prompt_id}")
+
+    # Claim and resolve in background
+    supabase.table("studio_prompts").update(
+        {"assets_status": "downloading"}
+    ).eq("id", prompt_id).is_("assets_status", "null").execute()
+
+    asyncio.create_task(asset_resolver.resolve(prompt_id))
+
+    return JSONResponse({"message": "Asset resolution triggered", "prompt_id": prompt_id})
 
 
 if __name__ == "__main__":
-    main()
+    port = int(os.environ.get("PORT", "8080"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -33,5 +33,19 @@ export async function POST(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Trigger asset resolution on approve (fire-and-forget)
+  if (decision === "approve") {
+    const workerUrl =
+      process.env.WORKER_URL ||
+      "https://worker-production-0296.up.railway.app";
+    fetch(`${workerUrl}/webhooks/plan-approved`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt_id: id }),
+    }).catch((err) => {
+      console.error("[review] Worker webhook failed:", err);
+    });
+  }
+
   return NextResponse.json({ success: true, status: newStatus });
 }
