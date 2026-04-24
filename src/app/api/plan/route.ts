@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     });
 
     const response = await anthropic.messages.create({
-      model: "claude-opus-4-7",
+      model: "claude-sonnet-4-5",
       max_tokens: 16000,
       system: SCENE_PLAN_SYSTEM_PROMPT,
       tools: [
