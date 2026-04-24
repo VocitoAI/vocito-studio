@@ -75,7 +75,7 @@ export async function POST(
 
     const response = await anthropic.messages.create({
       model: "claude-opus-4-7",
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: SCENE_PLAN_SYSTEM_PROMPT,
       tools: [
         {
@@ -105,7 +105,19 @@ export async function POST(
       throw new Error("Claude did not use the tool");
     }
 
-    const parsed = ScenePlanSchema.safeParse(toolUseBlock.input);
+    console.log("[/api/plan/regenerate] Stop reason:", response.stop_reason);
+    console.log("[/api/plan/regenerate] Input keys:", Object.keys(toolUseBlock.input || {}));
+    console.log("[/api/plan/regenerate] Full input (first 1000 chars):", JSON.stringify(toolUseBlock.input).slice(0, 1000));
+
+    let scenePlanJson = toolUseBlock.input as Record<string, unknown>;
+    if (scenePlanJson.scene_plan && !scenePlanJson.meta) {
+      scenePlanJson = scenePlanJson.scene_plan as Record<string, unknown>;
+    }
+    if (scenePlanJson.input && !scenePlanJson.meta) {
+      scenePlanJson = scenePlanJson.input as Record<string, unknown>;
+    }
+
+    const parsed = ScenePlanSchema.safeParse(scenePlanJson);
 
     if (!parsed.success) {
       const issuesJson = JSON.stringify(parsed.error.issues, null, 2);

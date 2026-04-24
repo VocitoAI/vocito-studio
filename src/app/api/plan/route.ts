@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-opus-4-7",
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: SCENE_PLAN_SYSTEM_PROMPT,
       tools: [
         {
@@ -110,10 +110,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const scenePlanJson = toolUseBlock.input;
-    console.log(
-      "[/api/plan] Tool use received, validating with Zod..."
-    );
+    console.log("[/api/plan] Stop reason:", response.stop_reason);
+    console.log("[/api/plan] Usage:", JSON.stringify(response.usage));
+    console.log("[/api/plan] Tool use block name:", toolUseBlock.name);
+    console.log("[/api/plan] Tool input keys:", Object.keys(toolUseBlock.input || {}));
+    console.log("[/api/plan] Full input (first 1000 chars):", JSON.stringify(toolUseBlock.input).slice(0, 1000));
+
+    let scenePlanJson = toolUseBlock.input as Record<string, unknown>;
+
+    // Handle possible nesting from Claude
+    if (scenePlanJson.scene_plan && !scenePlanJson.meta) {
+      scenePlanJson = scenePlanJson.scene_plan as Record<string, unknown>;
+    }
+    if (scenePlanJson.input && !scenePlanJson.meta) {
+      scenePlanJson = scenePlanJson.input as Record<string, unknown>;
+    }
 
     // Validate with Zod (belt-and-suspenders — tool use should match schema)
     const parsed = ScenePlanSchema.safeParse(scenePlanJson);
@@ -124,7 +135,8 @@ export async function POST(request: NextRequest) {
       console.error("[/api/plan] Zod validation failed despite tool use:");
       console.error(issuesJson);
 
-      const notesContent = `Tool use validation failed.\n\nIssues:\n${issuesJson.slice(0, 4000)}`;
+      const inputPreview = JSON.stringify(scenePlanJson).slice(0, 2000);
+      const notesContent = `Tool use validation failed.\n\nStop reason: ${response.stop_reason}\nUsage: ${JSON.stringify(response.usage)}\nTool name: ${toolUseBlock.name}\nInput keys: ${Object.keys(toolUseBlock.input || {}).join(", ")}\n\nInput preview:\n${inputPreview}\n\nIssues:\n${issuesJson.slice(0, 2000)}`;
 
       await supabase
         .from("studio_prompts")
