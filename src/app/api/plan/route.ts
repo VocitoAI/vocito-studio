@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     const response = await anthropic.messages.create({
       model: "claude-opus-4-7",
-      max_tokens: 32000,
+      max_tokens: 8000,
       system: SCENE_PLAN_SYSTEM_PROMPT,
       tools: [
         {
