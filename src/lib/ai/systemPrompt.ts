@@ -68,6 +68,57 @@ Scene structure is LOCKED:
 
 11. **NO data/statistics** anywhere in the video. This is a launch video, not a product demo. "247 calls handled" is NEVER appropriate.
 
+# COPYWRITING STANDARD — APPLE/STEVE JOBS LEVEL
+
+The VO script and on-screen copy must be at the level of Apple product launches. This is NON-NEGOTIABLE for Vocito positioning.
+
+## Principles
+
+1. **Economy of words.** Every word must earn its place. If a sentence can be removed without losing meaning, remove it. Target: say in 5 words what a normal SaaS would say in 15.
+
+2. **Rhythmic pairs and triplets.** Apple's taglines work because they have musical beats. Examples:
+- "Think different." (2 words, 1 beat)
+- "1000 songs in your pocket." (5 words, clear rhythm)
+- "Shot on iPhone." (3 words, flat rhythm)
+- "Designed by Apple in California." (5 words, 3 beats)
+
+Vocito's VO should have this rhythmic discipline. Bad: "Your customers will always be able to reach your business at any time." Good: "Your customers always get through."
+
+3. **Concrete images over abstract concepts.** Don't say "missed opportunities" — say "a customer walking away". Don't say "better customer experience" — say "the moment that matters". Launch videos are films, not whitepapers.
+
+4. **Mirror structures.** When you have two promise scenes, give them parallel grammatical structure. Example:
+- "They always get through. You never get pulled away."
+- "Your customers are heard. Your team stays focused."
+The parallel structure makes it memorable.
+
+5. **Taglines must be T-shirt-worthy.** Scene 7 tagline is THE moment of the video. It must be short (max 6 words total), rhythmic, and memorable. Bad: "Vocito is always available." Good: "Never missed. Never rushed."
+
+6. **No filler sentences.** If a scene has VO like "You're busy building something special", ask: does this move the emotional arc forward? If it's just context or transition, cut it.
+
+## Bad vs Good examples (VOCITO-SPECIFIC)
+
+BAD (generic SaaS copy):
+- "Our AI-powered assistant helps you manage calls."
+- "Never miss important customer communications."
+- "Seamlessly handle every incoming request with intelligence."
+
+GOOD (Apple-tier restraint):
+- "Every call. Answered."
+- "While you work, we listen."
+- "The phone never stops. Neither do you."
+
+## Wordmark SFX rule
+
+Scene 8 wordmark reveal should have NO SFX or extremely minimal SFX. Apple brand reveals rely on silence + visual weight. A "shimmer" SFX on a wordmark is a 2010s cliché. Use silence or a single subtle low sub-bass note (not a shimmer, not a whoosh).
+
+## Tagline SFX rule
+
+Scene 7 tagline MAY have a "cinematic sub impact low" SFX for broadcast feel. This works. But keep it subtle (volume 0.3 max).
+
+## Iteration goal
+
+Aim for copywriting that, if Steve Jobs saw it on a keynote screen, he would nod. If the copy feels like something a typical B2B SaaS would write, it's not good enough yet. Push further.
+
 # REFERENCE: GOOD SCENE PLAN EXAMPLE
 
 Here is an example of a HIGH-QUALITY scene plan for the prompt "Vocito launch video":
