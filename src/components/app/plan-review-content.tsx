@@ -14,6 +14,7 @@ import {
   Music,
   Mic,
   Volume2,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -433,20 +434,63 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
           </Card>
         )}
 
-        {isReviewed && (
+        {isReviewed && plan.status === "plan_rejected" && (
+          <Card>
+            <CardContent className="p-5">
+              <div className="mb-4">
+                <p className="font-medium mb-2">You rejected this plan</p>
+                {plan.review_feedback && (
+                  <p className="text-sm text-foreground-muted italic">
+                    &quot;{plan.review_feedback}&quot;
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-end">
+                <Button
+                  variant="accent"
+                  onClick={async () => {
+                    setSubmitting(true);
+                    try {
+                      const res = await fetch(
+                        `/api/plan/${plan.id}/regenerate`,
+                        { method: "POST" }
+                      );
+                      const data = await res.json();
+                      if (res.ok) {
+                        router.push(`/plan/${data.promptId}`);
+                      } else {
+                        setSubmitting(false);
+                        console.error("Regenerate failed:", data.error);
+                      }
+                    } catch (e) {
+                      setSubmitting(false);
+                      console.error("Error:", e);
+                    }
+                  }}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Regenerating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Regenerate with this feedback
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isReviewed && plan.status === "plan_approved" && (
           <Card>
             <CardContent className="p-5 text-center">
               <p className="text-sm text-foreground-muted">
-                This plan was{" "}
-                {plan.status === "plan_approved" ? "approved" : "rejected"}.
-                {plan.review_feedback && (
-                  <>
-                    <br />
-                    <span className="italic mt-2 inline-block">
-                      &quot;{plan.review_feedback}&quot;
-                    </span>
-                  </>
-                )}
+                This plan was approved. Ready for rendering (coming in B3).
               </p>
             </CardContent>
           </Card>
