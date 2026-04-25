@@ -79,7 +79,12 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
 
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)  # 5 min max
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise RuntimeError("Remotion render timed out after 5 minutes (likely OOM — need more RAM on Railway)")
 
     if process.returncode != 0:
         error = stderr.decode()[-1000:]
