@@ -14,7 +14,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("studio_video_runs")
-      .select("id, status, error_message, output_url, current_step, progress_percent, created_at")
+      .select("id, status, error_message, output_url, current_step, progress_percent, file_size_bytes, created_at")
       .eq("prompt_id", id)
       .order("created_at", { ascending: false })
       .limit(1);

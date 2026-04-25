@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import type { ScenePlan } from "@/types/scenePlan";
-import { VideoPreview } from "@/components/app/video-preview";
+// VideoPreview removed — replaced by server-rendered MP4
 
 type PlanRecord = {
   id: string;
@@ -44,6 +44,7 @@ type VideoRun = {
   output_url: string | null;
   current_step: string | null;
   progress_percent: number | null;
+  file_size_bytes: number | null;
   signed_url?: string | null;
 };
 
@@ -732,19 +733,28 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
               </Card>
             )}
 
-            {/* Video — when pipeline complete */}
-            {videoRun?.status === "completed" && scenePlan && (
+            {/* Video — server-rendered MP4 */}
+            {videoRun?.status === "completed" && videoRun.signed_url && (
               <Card className="mt-4">
                 <CardContent className="p-5">
                   <p className="label-mono mb-3">VIDEO</p>
-                  <VideoPreview
-                    scenePlan={scenePlan}
-                    assetUrls={Object.fromEntries(
-                      linkedAssets
-                        .filter((l) => l.signed_url)
-                        .map((l) => [l.usage_context, l.signed_url!])
-                    )}
+                  <video
+                    src={videoRun.signed_url}
+                    controls
+                    playsInline
+                    className="w-full rounded-lg bg-black"
+                    style={{ aspectRatio: "16 / 9" }}
                   />
+                  <div className="mt-3 flex items-center gap-3">
+                    <a
+                      href={videoRun.signed_url}
+                      download={`vocito-launch-${videoRun.id}.mp4`}
+                      className="inline-flex items-center gap-2 rounded-lg bg-accent text-background hover:bg-accent/90 h-10 px-4 text-sm font-medium transition-all"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download MP4
+                    </a>
+                  </div>
                 </CardContent>
               </Card>
             )}
