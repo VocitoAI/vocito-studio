@@ -29,7 +29,10 @@ VOICE_IDS = {
 
 
 def select_provider(language: str) -> tuple[str, str]:
-    # All languages use ElevenLabs (Fish Audio credits exhausted)
+    # EN → Fish Audio (better emotion tag support)
+    # NL/DE → ElevenLabs (multilingual)
+    if language == "en":
+        return ("fish_audio", VOICE_IDS["fish_audio"]["en"])
     if language in VOICE_IDS["elevenlabs"]:
         return ("elevenlabs", VOICE_IDS["elevenlabs"][language])
     return ("elevenlabs", VOICE_IDS["elevenlabs"]["en"])
