@@ -70,6 +70,7 @@ async def generate_plan_vo(supabase: Client, prompt_id: str) -> str:
         "asset_type": "vo_generated",
         "title": full_script[:80],
         "supabase_storage_path": storage_path,
+        "download_status": "ready",
         "used_in_runs": 1,
     }
 

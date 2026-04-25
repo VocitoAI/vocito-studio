@@ -266,16 +266,19 @@ async def _run_render_pipeline(prompt_id: str):
         logger.info(f"[render-poll] Render complete: {storage_path}")
 
     except Exception as e:
-        logger.exception(f"[render] Failed for {prompt_id}")
+        import traceback
+        tb = traceback.format_exc()
+        error_msg = f"{type(e).__name__}: {str(e)}\n{tb[-1500:]}"
+        logger.error(f"[render] Failed for {prompt_id}: {error_msg}")
         try:
             update_run(
                 run_id,
                 status="failed",
-                error_message=str(e)[:1000],
+                error_message=error_msg[:1000],
                 current_step="Pipeline failed",
             )
-        except Exception:
-            pass
+        except Exception as inner:
+            logger.error(f"[render] Failed to save error: {inner}")
 
 
 if __name__ == "__main__":
