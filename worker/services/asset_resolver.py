@@ -151,11 +151,21 @@ class AssetResolver:
         else:
             results = await self.es.search_sfx(query)
 
-        # Fallback: if no results, try simpler query (first 2 words)
+        # Fallback: if no results, try individual keywords (skip adjectives)
         if not results and " " in query:
-            words = query.split()
-            for fallback_len in [2, 1]:
-                fallback_query = " ".join(words[:fallback_len])
+            skip_words = {
+                "subtle", "soft", "warm", "brief", "short", "long", "low",
+                "high", "gentle", "quiet", "loud", "small", "big", "slow",
+                "fast", "light", "heavy", "deep", "bright", "dark",
+            }
+            words = [w for w in query.split() if w.lower() not in skip_words]
+            # Try pairs, then individual nouns
+            attempts = []
+            if len(words) >= 2:
+                attempts.append(" ".join(words[:2]))
+            attempts.extend(words)
+
+            for fallback_query in attempts:
                 logger.info(f"[resolver] Fallback search: '{fallback_query}'")
                 if asset_type == "music":
                     results = await self.es.search_music(fallback_query)
