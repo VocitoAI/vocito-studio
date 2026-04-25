@@ -63,30 +63,39 @@ async def asset_poll_loop():
 
 
 async def render_poll_loop():
-    """Poll for plans ready to render (approved + assets ready + no video run yet)."""
+    """Poll for approved plans with ready assets that have no video run yet."""
     logger.info("Render poll loop started")
     while True:
         try:
-            # Find approved plans with ready assets that don't have a video run yet
+            # Find approved plans with ready assets
             response = (
                 supabase.table("studio_prompts")
                 .select("id")
                 .eq("status", "plan_approved")
                 .eq("assets_status", "ready")
-                .is_("render_status", "null")
                 .order("created_at", desc=False)
-                .limit(1)
+                .limit(5)
                 .execute()
             )
 
-            # render_status column might not exist yet - fall through on error
             if response.data:
-                prompt_id = response.data[0]["id"]
-                # Only render if triggered via webhook (render_status = 'pending')
-                pass
+                for plan in response.data:
+                    prompt_id = plan["id"]
 
-        except Exception:
-            pass  # Column might not exist yet
+                    # Check if a video run already exists for this plan
+                    existing = (
+                        supabase.table("studio_video_runs")
+                        .select("id")
+                        .eq("prompt_id", prompt_id)
+                        .limit(1)
+                        .execute()
+                    )
+
+                    if not existing.data:
+                        logger.info(f"[render-poll] Plan {prompt_id} ready but no render triggered yet — waiting for manual trigger")
+
+        except Exception as e:
+            logger.error(f"[render-poll] Error: {e}", exc_info=True)
 
         await asyncio.sleep(10)
 
