@@ -157,20 +157,27 @@ async def _run_render_pipeline(prompt_id: str):
 
     def log_step(run_id: str, status: str, message: str, **extra):
         pipeline_log.append(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}")
-        update = {"status": status, "notes": "\n".join(pipeline_log), **extra}
+        # Only use columns that exist in the A3 schema
+        update: dict = {"status": status, "current_step": message}
+        # Store full log in error_message field temporarily (notes doesn't exist)
+        update["error_message"] = "\n".join(pipeline_log) if status == "failed" else None
+        for k, v in extra.items():
+            if k in ("started_at", "completed_at", "vo_url", "output_url", "progress_percent"):
+                update[k] = v
         supabase.table("studio_video_runs").update(update).eq("id", run_id).execute()
         logger.info(f"[render] {message}")
 
-    # Create video_run record
+    # Create video_run record (A3 schema: scene_plan is NOT NULL)
     run_row = (
         supabase.table("studio_video_runs")
         .insert(
             {
                 "prompt_id": prompt_id,
                 "status": "generating_vo",
-                "vo_started_at": now,
-                "scene_plan": {},
-                "notes": "Pipeline starting...",
+                "started_at": now,
+                "scene_plan": {"pending": True},
+                "current_step": "Pipeline starting...",
+                "progress_percent": 5,
             }
         )
         .execute()
@@ -202,9 +209,8 @@ async def _run_render_pipeline(prompt_id: str):
         log_step(
             run_id, "rendering",
             f"VO generated successfully (asset {vo_asset_id[:8]}...)",
-            vo_completed_at=datetime.now(timezone.utc).isoformat(),
-            render_started_at=datetime.now(timezone.utc).isoformat(),
             vo_url=vo_asset_id,
+            progress_percent=50,
         )
 
         # Step 2: Build asset URL map
@@ -235,7 +241,8 @@ async def _run_render_pipeline(prompt_id: str):
         log_step(
             run_id, "completed",
             f"Pipeline complete. VO + {len(asset_urls)} assets assembled. Remotion render pending.",
-            render_completed_at=datetime.now(timezone.utc).isoformat(),
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            progress_percent=100,
         )
 
     except Exception as e:

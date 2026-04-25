@@ -32,7 +32,7 @@ export function DashboardContent({
   ];
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -69,7 +69,7 @@ export function DashboardContent({
         </Card>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-10">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
           {statItems.map((stat) => {
             const Icon = stat.icon;
             return (

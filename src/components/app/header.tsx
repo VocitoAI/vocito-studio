@@ -11,10 +11,14 @@ const titles: Record<string, string> = {
 
 export function Header() {
   const pathname = usePathname();
-  const title = titles[pathname] || (pathname.startsWith("/plan/") ? "Plan Review" : "Studio");
+  const title =
+    titles[pathname] ||
+    (pathname.startsWith("/plan/") ? "Plan Review" : "Studio");
 
   return (
-    <header className="h-14 border-b border-border bg-background/50 backdrop-blur-xl sticky top-0 z-40 flex items-center px-8">
+    <header className="h-14 border-b border-border bg-background/50 backdrop-blur-xl sticky top-0 z-30 flex items-center px-4 md:px-8">
+      {/* Spacer for mobile hamburger */}
+      <div className="w-10 md:hidden" />
       <h2 className="text-sm font-medium text-foreground">{title}</h2>
       <div className="ml-auto flex items-center gap-3">
         <span className="text-xs text-foreground-subtle font-mono">

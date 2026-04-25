@@ -39,9 +39,10 @@ type VideoRun = {
   id: string;
   status: string;
   error_message: string | null;
-  storage_path: string | null;
+  output_url: string | null;
+  current_step: string | null;
+  progress_percent: number | null;
   signed_url?: string | null;
-  notes: string | null;
 };
 
 type LinkedAsset = {
@@ -68,33 +69,40 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [renderTriggered, setRenderTriggered] = useState(false);
   const router = useRouter();
 
-  // Poll for asset status + video run updates
+  const fetchRun = () => {
+    fetch(`/api/plan/${plan.id}/runs`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.run) {
+          setVideoRun(d.run);
+          if (!renderTriggered) setRenderTriggered(true);
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Poll for asset status updates
   useEffect(() => {
     if (plan.status !== "plan_approved") return;
-
-    const needsAssetPoll =
+    if (
       plan.assets_status === "downloading" ||
       plan.assets_status === "pending" ||
-      !plan.assets_status;
-
-    const needsRenderPoll = renderTriggered && (!videoRun || videoRun.status === "generating_vo" || videoRun.status === "rendering");
-
-    if (needsAssetPoll || needsRenderPoll) {
-      const interval = setInterval(() => {
-        router.refresh();
-        // Also refresh video run
-        if (renderTriggered) {
-          fetch(`/api/plan/${plan.id}/runs`)
-            .then((r) => r.json())
-            .then((d) => {
-              if (d.run) setVideoRun(d.run);
-            })
-            .catch(() => {});
-        }
-      }, 3000);
+      !plan.assets_status
+    ) {
+      const interval = setInterval(() => router.refresh(), 3000);
       return () => clearInterval(interval);
     }
-  }, [plan.status, plan.assets_status, plan.id, renderTriggered, videoRun, router]);
+  }, [plan.status, plan.assets_status, router]);
+
+  // Poll for render progress — always poll if render was triggered and not done
+  useEffect(() => {
+    if (!renderTriggered) return;
+    if (videoRun?.status === "completed" || videoRun?.status === "failed") return;
+
+    const interval = setInterval(fetchRun, 2000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderTriggered, videoRun?.status, plan.id]);
 
   // Fetch linked assets when ready
   useEffect(() => {
@@ -108,15 +116,8 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
 
   // Fetch existing video run on load
   useEffect(() => {
-    fetch(`/api/plan/${plan.id}/runs`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.run) {
-          setVideoRun(d.run);
-          setRenderTriggered(true);
-        }
-      })
-      .catch(() => {});
+    fetchRun();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.id]);
 
   const handleStartRender = async () => {
@@ -124,26 +125,20 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
     setRenderTriggered(true);
     try {
       await fetch(`/api/plan/${plan.id}/render`, { method: "POST" });
-      // Start polling for video run
-      setTimeout(() => {
-        fetch(`/api/plan/${plan.id}/runs`)
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.run) setVideoRun(d.run);
-          })
-          .catch(() => {});
-      }, 2000);
     } catch (err) {
       console.error("Render trigger failed:", err);
     }
     setSubmitting(false);
+    // Start polling immediately
+    setTimeout(fetchRun, 1000);
+    setTimeout(fetchRun, 3000);
   };
 
   const scenePlan = plan.scene_plan;
 
   if (!scenePlan) {
     return (
-      <div className="p-8 max-w-4xl mx-auto">
+      <div className="p-4 md:p-8 max-w-4xl mx-auto">
         <p className="text-foreground-muted">
           Plan not generated yet or failed.
         </p>
@@ -180,7 +175,7 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -232,7 +227,7 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
         {/* Audio overview */}
         <Card className="mb-6">
           <CardContent className="p-5">
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Music className="h-4 w-4 text-foreground-muted" />
@@ -732,18 +727,28 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
                         )}
                       </div>
 
-                      {/* Live log */}
-                      {videoRun?.notes && (
-                        <pre className="text-xs font-mono text-foreground-muted bg-ui rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
-                          {videoRun.notes}
-                        </pre>
+                      {/* Progress bar */}
+                      {videoRun?.progress_percent != null && videoRun.status !== "completed" && videoRun.status !== "failed" && (
+                        <div className="w-full bg-ui rounded-full h-1.5 mb-3">
+                          <div
+                            className="bg-accent h-1.5 rounded-full transition-all duration-500"
+                            style={{ width: `${videoRun.progress_percent}%` }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Current step */}
+                      {videoRun?.current_step && (
+                        <p className="text-xs font-mono text-foreground-muted">
+                          {videoRun.current_step}
+                        </p>
                       )}
 
                       {/* Error detail */}
                       {videoRun?.status === "failed" && videoRun.error_message && (
-                        <div className="mt-2 text-xs text-destructive font-mono">
+                        <pre className="mt-2 text-xs text-destructive font-mono bg-ui rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto">
                           {videoRun.error_message}
-                        </div>
+                        </pre>
                       )}
                     </div>
                   )}

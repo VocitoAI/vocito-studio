@@ -68,7 +68,7 @@ function getRegeneratedFromId(notes: string | null): string | null {
 
 export function LibraryContent({ prompts }: { prompts: PromptRow[] }) {
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}

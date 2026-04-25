@@ -14,7 +14,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("studio_video_runs")
-      .select("id, status, error_message, storage_path, created_at, notes")
+      .select("id, status, error_message, output_url, current_step, progress_percent, created_at")
       .eq("prompt_id", id)
       .order("created_at", { ascending: false })
       .limit(1);
@@ -32,11 +32,11 @@ export async function GET(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const run: any = { ...rawRun, signed_url: null };
 
-    if (run.storage_path && run.status === "completed") {
+    if (run.output_url && run.status === "completed") {
       try {
         const signed = await supabase.storage
           .from("studio-videos")
-          .createSignedUrl(run.storage_path, 3600);
+          .createSignedUrl(run.output_url, 3600);
         run.signed_url = signed.data?.signedUrl || null;
       } catch {
         // Storage bucket might not exist yet
