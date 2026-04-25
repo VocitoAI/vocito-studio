@@ -151,8 +151,21 @@ class AssetResolver:
         else:
             results = await self.es.search_sfx(query)
 
+        # Fallback: if no results, try simpler query (first 2 words)
+        if not results and " " in query:
+            words = query.split()
+            for fallback_len in [2, 1]:
+                fallback_query = " ".join(words[:fallback_len])
+                logger.info(f"[resolver] Fallback search: '{fallback_query}'")
+                if asset_type == "music":
+                    results = await self.es.search_music(fallback_query)
+                else:
+                    results = await self.es.search_sfx(fallback_query)
+                if results:
+                    break
+
         if not results:
-            logger.warning(f"[resolver] No results for '{query}'")
+            logger.warning(f"[resolver] No results for '{query}' (even with fallback)")
             return False
 
         chosen = results[0]
