@@ -92,7 +92,11 @@ async def render_poll_loop():
                 )
 
                 if existing.data:
-                    # Already has a run — skip
+                    run = existing.data[0]
+                    # Skip completed/failed runs
+                    if run["status"] in ("completed", "failed"):
+                        continue
+                    # Skip actively rendering runs (less than 10 min old)
                     continue
 
                 # Claim: create the run immediately to prevent duplicates
