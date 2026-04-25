@@ -30,6 +30,10 @@ WORKDIR /app/remotion
 RUN npm install
 RUN npx remotion browser ensure
 
+# Chromium flags for Docker (no sandbox, shared memory)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV CHROMIUM_FLAGS="--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu"
+
 WORKDIR /app/worker
 
 EXPOSE 8080

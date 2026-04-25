@@ -59,7 +59,7 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
 
     output_path = f"/tmp/render_{run_id}.mp4"
 
-    # Run Remotion CLI
+    # Run Remotion CLI with Chromium flags for Docker
     cmd = [
         "npx", "remotion", "render",
         "src/Root.tsx",
@@ -67,7 +67,9 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         output_path,
         f"--props={props_path}",
         "--codec=h264", "--crf=18",
-        "--concurrency=1", "--log=info",
+        "--concurrency=1", "--log=verbose",
+        "--disable-headless",
+        "--chromium-flags=--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu",
     ]
 
     logger.info(f"[remotion] Running: {' '.join(cmd[:6])}...")
