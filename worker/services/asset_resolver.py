@@ -214,10 +214,10 @@ class AssetResolver:
             logger.error(f"[resolver] Storage upload failed: {e}")
             return False
 
-        # Create asset row
+        # Create or update asset row (upsert on source+external_id)
         asset_row = (
             self.supabase.table("studio_assets")
-            .insert(
+            .upsert(
                 {
                     "source": "epidemic_sound",
                     "external_id": es_id,
@@ -230,7 +230,8 @@ class AssetResolver:
                     "supabase_storage_path": storage_path,
                     "download_status": "ready",
                     "used_in_runs": 1,
-                }
+                },
+                on_conflict="source,external_id",
             )
             .execute()
         )
