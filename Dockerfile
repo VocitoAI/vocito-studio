@@ -30,7 +30,7 @@ WORKDIR /app/remotion
 RUN npm install
 RUN npx remotion browser ensure
 
-WORKDIR /app
+WORKDIR /app/worker
 
 EXPOSE 8080
-CMD ["uvicorn", "worker.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

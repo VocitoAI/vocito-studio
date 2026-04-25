@@ -12,7 +12,7 @@ from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-REMOTION_PROJECT_PATH = "/app/remotion"
+REMOTION_PROJECT_PATH = os.environ.get("REMOTION_PROJECT_PATH", "/app/remotion")
 STORAGE_BUCKET = "studio-videos"
 
 
