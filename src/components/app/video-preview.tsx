@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Play, Pause, RotateCcw } from "lucide-react";
+import { Play, Pause, RotateCcw, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ScenePlan } from "@/types/scenePlan";
 
@@ -22,6 +22,7 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
+  const [downloading, setDownloading] = useState(false);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const voRef = useRef<HTMLAudioElement | null>(null);
   const sfxRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -139,6 +140,45 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
       ? scenePlan.audio.mixLevels.musicDuckedDuringVO
       : scenePlan.audio.mixLevels.musicBase;
   }, [currentFrame, playing, scenePlan.audio.mixLevels]);
+
+  const handleDownload = async (key: string, label: string) => {
+    const url = assetUrls[key];
+    if (!url) return;
+    setDownloading(true);
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `vocito-${label}.mp3`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.error("Download failed:", e);
+    }
+    setDownloading(false);
+  };
+
+  const handleDownloadAll = async () => {
+    setDownloading(true);
+    for (const [key, url] of Object.entries(assetUrls)) {
+      if (!url) continue;
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `vocito-${key}.mp3`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        // Small delay between downloads
+        await new Promise((r) => setTimeout(r, 300));
+      } catch (e) {
+        console.error(`Download failed for ${key}:`, e);
+      }
+    }
+    setDownloading(false);
+  };
 
   // Cleanup
   useEffect(() => {
@@ -293,6 +333,45 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
           {Math.floor(currentTime / 60)}:
           {String(Math.floor(currentTime % 60)).padStart(2, "0")}
         </span>
+      </div>
+
+      {/* Download buttons */}
+      <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
+        <Button
+          variant="accent"
+          size="sm"
+          onClick={handleDownloadAll}
+          disabled={downloading}
+        >
+          {downloading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Download className="h-3.5 w-3.5" />
+          )}
+          Download all assets
+        </Button>
+        {assetUrls.vo_main && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => handleDownload("vo_main", "voiceover")}
+            disabled={downloading}
+          >
+            <Download className="h-3.5 w-3.5" />
+            VO
+          </Button>
+        )}
+        {assetUrls.music_main && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => handleDownload("music_main", "music")}
+            disabled={downloading}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Music
+          </Button>
+        )}
       </div>
     </div>
   );
