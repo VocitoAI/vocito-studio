@@ -35,25 +35,109 @@ type PlanRecord = {
   assets_error: string | null;
 };
 
+type VideoRun = {
+  id: string;
+  status: string;
+  error_message: string | null;
+  storage_path: string | null;
+  signed_url?: string | null;
+  notes: string | null;
+};
+
+type LinkedAsset = {
+  id: string;
+  usage_context: string;
+  scene_id: string | null;
+  asset: {
+    id: string;
+    asset_type: string;
+    title: string | null;
+    supabase_storage_path: string | null;
+    download_status: string;
+  } | null;
+  signed_url?: string;
+};
+
 export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [videoRun, setVideoRun] = useState<VideoRun | null>(null);
+  const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([]);
+  const [renderTriggered, setRenderTriggered] = useState(false);
   const router = useRouter();
 
-  // Poll for asset status updates
+  // Poll for asset status + video run updates
   useEffect(() => {
-    if (
-      plan.status === "plan_approved" &&
-      (plan.assets_status === "downloading" || plan.assets_status === "pending" || !plan.assets_status)
-    ) {
+    if (plan.status !== "plan_approved") return;
+
+    const needsAssetPoll =
+      plan.assets_status === "downloading" ||
+      plan.assets_status === "pending" ||
+      !plan.assets_status;
+
+    const needsRenderPoll = renderTriggered && (!videoRun || videoRun.status === "generating_vo" || videoRun.status === "rendering");
+
+    if (needsAssetPoll || needsRenderPoll) {
       const interval = setInterval(() => {
         router.refresh();
-      }, 5000);
+        // Also refresh video run
+        if (renderTriggered) {
+          fetch(`/api/plan/${plan.id}/runs`)
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.run) setVideoRun(d.run);
+            })
+            .catch(() => {});
+        }
+      }, 3000);
       return () => clearInterval(interval);
     }
-  }, [plan.status, plan.assets_status, router]);
+  }, [plan.status, plan.assets_status, plan.id, renderTriggered, videoRun, router]);
+
+  // Fetch linked assets when ready
+  useEffect(() => {
+    if (plan.assets_status === "ready" || plan.assets_status === "partial") {
+      fetch(`/api/plan/${plan.id}/assets`)
+        .then((r) => r.json())
+        .then((d) => setLinkedAssets(d.assets || []))
+        .catch(() => {});
+    }
+  }, [plan.id, plan.assets_status]);
+
+  // Fetch existing video run on load
+  useEffect(() => {
+    fetch(`/api/plan/${plan.id}/runs`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.run) {
+          setVideoRun(d.run);
+          setRenderTriggered(true);
+        }
+      })
+      .catch(() => {});
+  }, [plan.id]);
+
+  const handleStartRender = async () => {
+    setSubmitting(true);
+    setRenderTriggered(true);
+    try {
+      await fetch(`/api/plan/${plan.id}/render`, { method: "POST" });
+      // Start polling for video run
+      setTimeout(() => {
+        fetch(`/api/plan/${plan.id}/runs`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.run) setVideoRun(d.run);
+          })
+          .catch(() => {});
+      }, 2000);
+    } catch (err) {
+      console.error("Render trigger failed:", err);
+    }
+    setSubmitting(false);
+  };
 
   const scenePlan = plan.scene_plan;
 
@@ -525,52 +609,143 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
         )}
 
         {isReviewed && plan.status === "plan_approved" && (
-          <Card>
-            <CardContent className="p-5">
-              <p className="label-mono mb-3">ASSETS</p>
+          <>
+            {/* Asset status */}
+            <Card className="mb-4">
+              <CardContent className="p-5">
+                <p className="label-mono mb-3">ASSETS</p>
 
-              {(!plan.assets_status || plan.assets_status === "pending") && (
-                <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Waiting for asset resolution...</span>
-                </div>
-              )}
+                {(!plan.assets_status || plan.assets_status === "pending") && (
+                  <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Waiting for asset resolution...</span>
+                  </div>
+                )}
 
-              {plan.assets_status === "downloading" && (
-                <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>
-                    Searching Epidemic Sound for music and SFX...
-                  </span>
-                </div>
-              )}
+                {plan.assets_status === "downloading" && (
+                  <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Searching Epidemic Sound for music and SFX...</span>
+                  </div>
+                )}
 
-              {plan.assets_status === "ready" && (
-                <div className="flex items-center gap-2 text-sm text-success">
-                  <Check className="h-4 w-4" />
-                  <span>All assets ready. Rendering coming in B3.</span>
-                </div>
-              )}
+                {(plan.assets_status === "ready" || plan.assets_status === "partial") && (
+                  <>
+                    <div className="flex items-center gap-2 text-sm text-success mb-4">
+                      <Check className="h-4 w-4" />
+                      <span>
+                        {plan.assets_status === "ready"
+                          ? "All assets ready"
+                          : "Some assets ready (partial)"}
+                      </span>
+                    </div>
 
-              {plan.assets_status === "partial" && (
-                <div className="text-sm text-foreground-muted">
-                  <p>Some assets resolved, others failed.</p>
-                  {plan.assets_error && (
-                    <p className="text-xs text-destructive mt-1">
-                      {plan.assets_error}
-                    </p>
+                    {linkedAssets.length > 0 && (
+                      <div className="space-y-3">
+                        {linkedAssets.map((link) => (
+                          <div
+                            key={link.id}
+                            className="pb-3 border-b border-border last:border-0"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-sm font-medium">
+                                {link.usage_context.replace(/_/g, " ")}
+                              </p>
+                              <span className="text-xs text-foreground-muted truncate ml-2 max-w-[200px]">
+                                {link.asset?.title || ""}
+                              </span>
+                            </div>
+                            {link.signed_url && (
+                              <audio
+                                src={link.signed_url}
+                                controls
+                                className="w-full h-8"
+                                preload="none"
+                              />
+                            )}
+                          </div>
+                        ))}
+                        <p className="text-xs text-foreground-subtle mt-2">
+                          Listen before rendering. If music or SFX feels wrong,
+                          create a new plan.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {plan.assets_status === "failed" && (
+                  <div className="text-sm text-destructive">
+                    Asset resolution failed
+                    {plan.assets_error && `: ${plan.assets_error}`}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Render section */}
+            {plan.assets_status === "ready" && (
+              <Card>
+                <CardContent className="p-5">
+                  <p className="label-mono mb-3">RENDER</p>
+
+                  {!videoRun && !renderTriggered && (
+                    <Button
+                      variant="accent"
+                      onClick={handleStartRender}
+                      disabled={submitting}
+                    >
+                      {submitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      Generate VO &amp; Render
+                    </Button>
                   )}
-                </div>
-              )}
 
-              {plan.assets_status === "failed" && (
-                <div className="text-sm text-destructive">
-                  Asset resolution failed
-                  {plan.assets_error && `: ${plan.assets_error}`}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  {(renderTriggered && !videoRun) && (
+                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Starting render pipeline...</span>
+                    </div>
+                  )}
+
+                  {videoRun?.status === "generating_vo" && (
+                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Generating voice-over...</span>
+                    </div>
+                  )}
+
+                  {videoRun?.status === "rendering" && (
+                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Rendering video...</span>
+                    </div>
+                  )}
+
+                  {videoRun?.status === "completed" && (
+                    <div>
+                      <div className="flex items-center gap-2 text-sm text-success mb-3">
+                        <Check className="h-4 w-4" />
+                        <span>VO generated + assets assembled</span>
+                      </div>
+                      <p className="text-xs text-foreground-muted">
+                        {videoRun.notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {videoRun?.status === "failed" && (
+                    <div className="text-sm text-destructive">
+                      Render failed: {videoRun.error_message}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
       </motion.div>
     </div>

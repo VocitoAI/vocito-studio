@@ -23,10 +23,8 @@ export async function GET(
         id,
         asset_type,
         title,
-        duration_ms,
-        bpm,
-        mood,
         supabase_storage_path,
+        storage_bucket,
         download_status
       )
     `
@@ -37,5 +35,24 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ assets: data });
+  // Generate signed URLs for audio preview
+  const assets = await Promise.all(
+    (data || []).map(async (link) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const asset = link.asset as any;
+      let signed_url: string | null = null;
+
+      if (asset?.supabase_storage_path) {
+        const bucket = asset.storage_bucket || "studio-assets";
+        const result = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(asset.supabase_storage_path, 3600);
+        signed_url = result.data?.signedUrl || null;
+      }
+
+      return { ...link, signed_url };
+    })
+  );
+
+  return NextResponse.json({ assets });
 }
