@@ -33,12 +33,12 @@ async def generate_plan_vo(supabase: Client, prompt_id: str) -> str:
     provider, voice_id = select_provider(language)
     text_hash = hash_vo_request(full_script, language, voice_id, speed)
 
-    # Check cache
+    # Check cache — use external_id which always exists
     cache = (
         supabase.table("studio_assets")
         .select("id")
-        .eq("vo_text_hash", text_hash)
-        .eq("download_status", "ready")
+        .eq("external_id", text_hash)
+        .eq("asset_type", "vo_generated")
         .limit(1)
         .execute()
     )
@@ -62,28 +62,40 @@ async def generate_plan_vo(supabase: Client, prompt_id: str) -> str:
         file_options={"content-type": "audio/mpeg", "upsert": "true"},
     )
 
-    # Create asset row
-    now = datetime.now(timezone.utc).isoformat()
-    asset_row = (
-        supabase.table("studio_assets")
-        .upsert(
-            {
-                "source": metadata["provider"],
-                "external_id": text_hash,
-                "asset_type": "vo",
-                "title": full_script[:80],
-                "supabase_storage_path": storage_path,
-                "download_status": "ready",
-                "used_in_runs": 1,
-                "vo_provider": metadata["provider"],
-                "vo_language": metadata["language"],
-                "vo_voice_id": metadata["voice_id"],
-                "vo_text_hash": text_hash,
-            },
-            on_conflict="source,external_id",
+    # Create asset row — only use columns that exist in A3 schema
+    asset_data = {
+        "source": metadata["provider"],
+        "external_id": text_hash,
+        "asset_type": "vo_generated",
+        "title": full_script[:80],
+        "supabase_storage_path": storage_path,
+        "used_in_runs": 1,
+    }
+
+    # Try adding B3 columns if they exist (graceful)
+    try:
+        asset_row = (
+            supabase.table("studio_assets")
+            .upsert(
+                {
+                    **asset_data,
+                    "vo_provider": metadata["provider"],
+                    "vo_language": metadata["language"],
+                    "vo_voice_id": metadata["voice_id"],
+                    "vo_text_hash": text_hash,
+                },
+                on_conflict="source,external_id",
+            )
+            .execute()
         )
-        .execute()
-    )
+    except Exception:
+        # B3 columns don't exist yet — insert without them
+        logger.warning("[vo] B3 columns missing, inserting without vo_* fields")
+        asset_row = (
+            supabase.table("studio_assets")
+            .upsert(asset_data, on_conflict="source,external_id")
+            .execute()
+        )
 
     asset_id = asset_row.data[0]["id"]
     logger.info(f"[vo] Stored VO asset {asset_id}")
