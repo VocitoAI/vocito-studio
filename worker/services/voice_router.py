@@ -29,12 +29,10 @@ VOICE_IDS = {
 
 
 def select_provider(language: str) -> tuple[str, str]:
-    if language == "en":
-        return ("fish_audio", VOICE_IDS["fish_audio"]["en"])
-    elif language in ("nl", "de"):
+    # All languages use ElevenLabs (Fish Audio credits exhausted)
+    if language in VOICE_IDS["elevenlabs"]:
         return ("elevenlabs", VOICE_IDS["elevenlabs"][language])
-    else:
-        return ("elevenlabs", VOICE_IDS["elevenlabs"]["en"])
+    return ("elevenlabs", VOICE_IDS["elevenlabs"]["en"])
 
 
 async def generate_vo(
