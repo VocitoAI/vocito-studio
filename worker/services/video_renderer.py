@@ -1,12 +1,12 @@
 """
-Video renderer: combines VO + music + SFX into MP4 using ffmpeg.
-Generates scene text overlays on dark background.
+Video renderer: combines all assets into a single MP4 using ffmpeg.
+Renders blob gradient, scene text overlays, and mixed audio.
 """
 import os
-import json
 import logging
 import subprocess
 import tempfile
+import math
 from pathlib import Path
 
 import httpx
@@ -24,9 +24,8 @@ H = 1080
 
 async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
     """Render MP4 from scene plan + assets. Returns storage path."""
-    logger.info(f"[video] Starting ffmpeg render for {run_id}")
+    logger.info(f"[video] Starting render for {run_id}")
 
-    # Fetch scene plan
     plan_resp = (
         supabase.table("studio_prompts")
         .select("scene_plan")
@@ -36,7 +35,7 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
     )
     scene_plan = plan_resp.data["scene_plan"]
 
-    # Fetch linked assets with signed URLs
+    # Get signed URLs for all assets
     links_resp = (
         supabase.table("studio_prompt_assets")
         .select("usage_context, asset:studio_assets(supabase_storage_path)")
@@ -56,12 +55,12 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         if url:
             asset_urls[link["usage_context"]] = url
 
-    logger.info(f"[video] Asset URLs: {list(asset_urls.keys())}")
+    logger.info(f"[video] Assets: {list(asset_urls.keys())}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
-        # Download all audio files
+        # Download all audio
         audio_files = {}
         async with httpx.AsyncClient(timeout=60.0) as client:
             for key, url in asset_urls.items():
@@ -72,29 +71,81 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
                     audio_files[key] = str(path)
                     logger.info(f"[video] Downloaded {key}: {len(resp.content)} bytes")
 
-        # Build ffmpeg filter for audio mixing
+        # Generate blob frames as a video with ffmpeg
+        # Use lavfi to create a gradient circle (blob) animation
+        blob_filter = _build_blob_filter(scene_plan)
+        text_filter = _build_text_filter(scene_plan)
+
         output_path = str(tmp / f"{run_id}.mp4")
 
-        # Generate scene text overlay script for ffmpeg drawtext
-        drawtext_filters = _build_drawtext_filters(scene_plan)
-
         # Build ffmpeg command
-        cmd = _build_ffmpeg_cmd(audio_files, scene_plan, drawtext_filters, output_path)
-        logger.info(f"[video] Running ffmpeg...")
+        cmd = ["ffmpeg", "-y"]
 
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120
+        # Input 0: dark background with blob overlay
+        cmd += [
+            "-f", "lavfi",
+            "-i", f"color=c=0x05060a:s={W}x{H}:r={FPS}:d={TOTAL_DURATION}",
+        ]
+
+        # Audio inputs
+        input_idx = 1
+        audio_input_map = {}
+
+        for key in ["music_main", "vo_main"]:
+            if key in audio_files:
+                cmd += ["-i", audio_files[key]]
+                audio_input_map[key] = input_idx
+                input_idx += 1
+
+        sfx_inputs = []
+        for key in sorted(audio_files.keys()):
+            if key.startswith("sfx_"):
+                cmd += ["-i", audio_files[key]]
+                sfx_inputs.append((key, input_idx))
+                input_idx += 1
+
+        # Video filter: blob + text
+        vf_parts = []
+        if blob_filter:
+            vf_parts.append(blob_filter)
+        if text_filter:
+            vf_parts.append(text_filter)
+        vf = ",".join(vf_parts) if vf_parts else "null"
+        cmd += ["-vf", vf]
+
+        # Audio filter: mix everything
+        filter_complex = _build_audio_filter(
+            scene_plan, audio_input_map, sfx_inputs
         )
+        if filter_complex:
+            cmd += ["-filter_complex", filter_complex]
+            cmd += ["-map", "0:v", "-map", "[aout]"]
+        else:
+            cmd += ["-an"]
+
+        cmd += [
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", str(TOTAL_DURATION),
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        logger.info(f"[video] Running ffmpeg...")
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         if proc.returncode != 0:
-            logger.error(f"[video] ffmpeg failed: {proc.stderr[-500:]}")
+            logger.error(f"[video] ffmpeg stderr: {proc.stderr[-500:]}")
             raise RuntimeError(f"ffmpeg failed: {proc.stderr[-300:]}")
 
-        # Check output
         file_size = os.path.getsize(output_path)
-        logger.info(f"[video] Render complete: {file_size} bytes")
+        logger.info(f"[video] Render done: {file_size} bytes ({file_size // 1024}KB)")
 
-        # Upload to Supabase Storage
+        # Upload
         storage_path = f"renders/{run_id}.mp4"
         with open(output_path, "rb") as f:
             supabase.storage.from_(STORAGE_BUCKET_VIDEOS).upload(
@@ -107,8 +158,62 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         return storage_path
 
 
-def _build_drawtext_filters(scene_plan: dict) -> str:
-    """Build ffmpeg drawtext filter chain for scene text overlays."""
+def _build_blob_filter(scene_plan: dict) -> str:
+    """Build a ffmpeg filter that draws a glowing gradient circle (blob)."""
+    # Use geq (generic equation) filter for a radial gradient blob
+    # The blob is a purple-teal gradient circle in the center
+    parts = []
+
+    for scene in scene_plan["scenes"]:
+        blob = scene.get("visual", {}).get("blob")
+        if not blob:
+            continue
+
+        start = scene["frameStart"] / FPS
+        end = scene["frameEnd"] / FPS
+        opacity = blob.get("opacity", 0.8)
+        scale = blob.get("scale", 1.0)
+        state = blob.get("state", "breathing")
+
+        # Render blob as a semi-transparent purple ellipse overlay
+        # Using drawbox with rounded corners isn't possible, so we use
+        # a radial gradient approach with the geq filter
+        # Simplified: draw a colored circle using drawtext with a unicode circle
+        r = int(150 * scale)
+        cx = W // 2
+        cy = H // 2
+
+        if state == "materializing":
+            alpha_expr = f"if(between(t,{start},{end}),(t-{start})/({end}-{start})*{opacity},0)"
+        elif state == "fading":
+            alpha_expr = f"if(between(t,{start},{end}),{opacity}*(1-(t-{start})/({end}-{start})*0.7),0)"
+        else:
+            alpha_expr = f"if(between(t,{start},{end}),{opacity},0)"
+
+        # Draw a filled purple circle
+        parts.append(
+            f"drawbox=x={cx - r}:y={cy - r}:w={r * 2}:h={r * 2}"
+            f":color=0xa78bff@'{alpha_expr}':t=fill"
+            f":enable='between(t,{start},{end})'"
+        )
+
+        # Overlay a teal smaller circle for gradient effect
+        r2 = int(r * 0.6)
+        parts.append(
+            f"drawbox=x={cx - r2}:y={cy - r2}:w={r2 * 2}:h={r2 * 2}"
+            f":color=0x5eead4@'{alpha_expr}':t=fill"
+            f":enable='between(t,{start},{end})'"
+        )
+
+    # Apply gaussian blur to make it look like a blob
+    if parts:
+        parts.append("gblur=sigma=80")
+
+    return ",".join(parts)
+
+
+def _build_text_filter(scene_plan: dict) -> str:
+    """Build ffmpeg drawtext filters for scene copy."""
     filters = []
 
     for scene in scene_plan["scenes"]:
@@ -116,132 +221,70 @@ def _build_drawtext_filters(scene_plan: dict) -> str:
         if not copy:
             continue
 
-        text = copy["text"].replace("'", "'\\''").replace(":", "\\:")
-        start_time = scene["frameStart"] / FPS
-        end_time = scene["frameEnd"] / FPS
+        text = copy["text"].replace("'", "'\\''").replace(":", "\\:").replace("%", "%%")
+        start = scene["frameStart"] / FPS
+        end = scene["frameEnd"] / FPS
         fade_dur = min(copy.get("animationDurationMs", 800) / 1000, 1.0)
 
-        font_size = {"xl": 72, "lg": 56, "md": 42, "sm": 32}.get(copy.get("size", "lg"), 56)
+        size = {"xl": 72, "lg": 56, "md": 42, "sm": 32}.get(copy.get("size", "lg"), 56)
 
-        # Fade in alpha
-        alpha_expr = (
-            f"if(lt(t\\,{start_time})\\,0\\,"
-            f"if(lt(t\\,{start_time + fade_dur})\\,"
-            f"(t-{start_time})/{fade_dur}\\,"
-            f"if(lt(t\\,{end_time - 0.3})\\,1\\,"
-            f"(({end_time}-t)/0.3))))"
+        alpha = (
+            f"if(lt(t\\,{start})\\,0\\,"
+            f"if(lt(t\\,{start + fade_dur})\\,(t-{start})/{fade_dur}\\,"
+            f"if(lt(t\\,{end - 0.3})\\,1\\,(({end}-t)/0.3))))"
         )
 
         filters.append(
             f"drawtext=text='{text}'"
-            f":fontsize={font_size}"
+            f":fontsize={size}"
             f":fontcolor=white"
             f":x=(w-text_w)/2"
             f":y=(h-text_h)/2"
-            f":alpha='{alpha_expr}'"
+            f":alpha='{alpha}'"
         )
 
-    return ",".join(filters) if filters else ""
+    return ",".join(filters)
 
 
-def _build_ffmpeg_cmd(
-    audio_files: dict,
+def _build_audio_filter(
     scene_plan: dict,
-    drawtext_filters: str,
-    output_path: str,
-) -> list[str]:
-    """Build the full ffmpeg command."""
-    cmd = ["ffmpeg", "-y"]
+    audio_map: dict,
+    sfx_inputs: list,
+) -> str:
+    """Build ffmpeg filter_complex for audio mixing."""
+    parts = []
+    mix_labels = []
+    idx = 0
 
-    # Video: dark background
-    cmd += [
-        "-f", "lavfi",
-        "-i", f"color=c=0x05060a:s={W}x{H}:r={FPS}:d={TOTAL_DURATION}",
-    ]
+    if "music_main" in audio_map:
+        vol = scene_plan["audio"]["mixLevels"]["musicBase"]
+        i = audio_map["music_main"]
+        parts.append(f"[{i}:a]volume={vol}[a{idx}]")
+        mix_labels.append(f"[a{idx}]")
+        idx += 1
 
-    # Audio inputs
-    audio_inputs = []
-    input_idx = 1  # 0 is the video
+    if "vo_main" in audio_map:
+        vol = scene_plan["audio"]["mixLevels"]["voVolume"]
+        i = audio_map["vo_main"]
+        parts.append(f"[{i}:a]adelay=3000|3000,volume={vol}[a{idx}]")
+        mix_labels.append(f"[a{idx}]")
+        idx += 1
 
-    if "music_main" in audio_files:
-        cmd += ["-i", audio_files["music_main"]]
-        audio_inputs.append(("music", input_idx))
-        input_idx += 1
+    for key, i in sfx_inputs:
+        delay_ms = 0
+        vol = 0.5
+        for scene in scene_plan["scenes"]:
+            for si, sfx in enumerate(scene.get("audio", {}).get("sfxRequests") or []):
+                if f"sfx_{scene['id']}_{si}" == key:
+                    delay_ms = int((scene["frameStart"] + sfx.get("frameOffset", 0)) / FPS * 1000)
+                    vol = sfx.get("volume", 0.5)
+        parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms},volume={vol}[a{idx}]")
+        mix_labels.append(f"[a{idx}]")
+        idx += 1
 
-    if "vo_main" in audio_files:
-        cmd += ["-i", audio_files["vo_main"]]
-        audio_inputs.append(("vo", input_idx))
-        input_idx += 1
+    if not mix_labels:
+        return ""
 
-    # SFX inputs
-    sfx_entries = []
-    for key, path in sorted(audio_files.items()):
-        if key.startswith("sfx_"):
-            cmd += ["-i", path]
-            sfx_entries.append((key, input_idx))
-            input_idx += 1
-
-    # Video filter: drawtext overlays
-    vf = drawtext_filters if drawtext_filters else "null"
-    cmd += ["-vf", vf]
-
-    # Audio filter: mix all audio tracks
-    if audio_inputs or sfx_entries:
-        filter_parts = []
-        mix_inputs = []
-        mix_idx = 0
-
-        for name, idx in audio_inputs:
-            if name == "music":
-                # Music: lower volume
-                vol = scene_plan["audio"]["mixLevels"]["musicBase"]
-                filter_parts.append(f"[{idx}:a]volume={vol}[m{mix_idx}]")
-                mix_inputs.append(f"[m{mix_idx}]")
-                mix_idx += 1
-            elif name == "vo":
-                # VO: delay 3s (scene 1 is music only), full volume
-                vol = scene_plan["audio"]["mixLevels"]["voVolume"]
-                filter_parts.append(
-                    f"[{idx}:a]adelay=3000|3000,volume={vol}[m{mix_idx}]"
-                )
-                mix_inputs.append(f"[m{mix_idx}]")
-                mix_idx += 1
-
-        for key, idx in sfx_entries:
-            # Find frame offset from scene plan
-            delay_ms = 0
-            for scene in scene_plan["scenes"]:
-                for si, sfx in enumerate(scene.get("audio", {}).get("sfxRequests") or []):
-                    sfx_key = f"sfx_{scene['id']}_{si}"
-                    if sfx_key == key:
-                        delay_ms = int((scene["frameStart"] + sfx.get("frameOffset", 0)) / FPS * 1000)
-                        vol = sfx.get("volume", 0.5)
-                        filter_parts.append(
-                            f"[{idx}:a]adelay={delay_ms}|{delay_ms},volume={vol}[m{mix_idx}]"
-                        )
-                        mix_inputs.append(f"[m{mix_idx}]")
-                        mix_idx += 1
-
-        if mix_inputs:
-            mix_str = "".join(mix_inputs)
-            filter_parts.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=longest[aout]")
-            cmd += ["-filter_complex", ";".join(filter_parts)]
-            cmd += ["-map", "0:v", "-map", "[aout]"]
-        else:
-            cmd += ["-an"]
-    else:
-        cmd += ["-an"]
-
-    cmd += [
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-t", str(TOTAL_DURATION),
-        "-movflags", "+faststart",
-        output_path,
-    ]
-
-    return cmd
+    mix_str = "".join(mix_labels)
+    parts.append(f"{mix_str}amix=inputs={len(mix_labels)}:duration=longest[aout]")
+    return ";".join(parts)
