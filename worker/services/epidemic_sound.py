@@ -105,12 +105,13 @@ class EpidemicSoundClient:
                 return []
 
             data = resp.json()
-            sfx_dict = data.get("entities", {}).get("sfx", {})
+            # SFX endpoint returns entities under "tracks" (same as music)
+            sfx_dict = data.get("entities", {}).get("tracks", data.get("entities", {}).get("sfx", {}))
             hits = data.get("meta", {}).get("hits", [])
 
             results = []
             for hit in hits[:limit]:
-                sfx_id = str(hit.get("sfxId", hit.get("trackId", "")))
+                sfx_id = str(hit.get("trackId", hit.get("sfxId", "")))
                 sfx = sfx_dict.get(sfx_id, {})
                 if not sfx:
                     continue
