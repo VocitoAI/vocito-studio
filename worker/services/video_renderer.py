@@ -93,15 +93,17 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         await process.wait()
         raise RuntimeError("Remotion render timed out after 5 minutes")
 
-    stdout_text = stdout.decode()[-2000:] if stdout else ""
-    stderr_text = stderr.decode()[-2000:] if stderr else ""
+    stdout_text = stdout.decode() if stdout else ""
+    stderr_text = stderr.decode() if stderr else ""
 
-    logger.info(f"[remotion] stdout: {stdout_text[-500:]}")
+    logger.info(f"[remotion] stdout ({len(stdout_text)} chars): {stdout_text[-1000:]}")
     if stderr_text:
-        logger.info(f"[remotion] stderr: {stderr_text[-500:]}")
+        logger.error(f"[remotion] stderr ({len(stderr_text)} chars): {stderr_text[-1000:]}")
 
     if process.returncode != 0:
-        raise RuntimeError(f"Remotion render failed (exit {process.returncode}): {stderr_text[-300:]}")
+        # Combine both outputs for the error — the actual error could be in either
+        full_output = f"STDOUT:\n{stdout_text[-500:]}\n\nSTDERR:\n{stderr_text[-500:]}"
+        raise RuntimeError(f"Remotion exit {process.returncode}:\n{full_output}")
 
     if not Path(output_path).exists():
         raise RuntimeError("Remotion completed but output file missing")
