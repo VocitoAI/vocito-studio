@@ -127,7 +127,7 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
     if (voRef.current) voRef.current.currentTime = 0;
   };
 
-  // Download: record canvas + audio as WebM
+  // Download: play preview + record canvas + capture audio as WebM
   const handleDownload = async () => {
     if (recording) return;
     stopAll();
@@ -141,55 +141,62 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
     canvas.height = H;
     const ctx = canvas.getContext("2d")!;
 
-    // Load + mix audio via Web Audio API
+    // Use AudioContext to capture audio from <audio> elements
     const audioCtx = new AudioContext();
     const dest = audioCtx.createMediaStreamDestination();
 
-    async function loadBuf(url: string) {
-      try {
-        const r = await fetch(url);
-        return await audioCtx.decodeAudioData(await r.arrayBuffer());
-      } catch { return null; }
+    // Connect music element
+    if (musicRef.current && assetUrls.music_main) {
+      const source = audioCtx.createMediaElementSource(musicRef.current);
+      const gain = audioCtx.createGain();
+      gain.gain.value = scenePlan.audio.mixLevels.musicDuckedDuringVO;
+      source.connect(gain).connect(dest);
+      source.connect(audioCtx.destination); // also play through speakers
+      musicRef.current.currentTime = 0;
+      musicRef.current.play().catch(() => {});
     }
 
-    const musicBuf = assetUrls.music_main ? await loadBuf(assetUrls.music_main) : null;
-    const voBuf = assetUrls.vo_main ? await loadBuf(assetUrls.vo_main) : null;
-
-    if (musicBuf) {
-      const s = audioCtx.createBufferSource();
-      s.buffer = musicBuf;
-      const g = audioCtx.createGain();
-      g.gain.value = scenePlan.audio.mixLevels.musicDuckedDuringVO;
-      s.connect(g).connect(dest);
-      s.start(0);
-    }
-    if (voBuf) {
-      const s = audioCtx.createBufferSource();
-      s.buffer = voBuf;
-      const g = audioCtx.createGain();
-      g.gain.value = scenePlan.audio.mixLevels.voVolume;
-      s.connect(g).connect(dest);
-      s.start(audioCtx.currentTime + 3);
-    }
-    for (const scene of scenePlan.scenes) {
-      for (let i = 0; i < (scene.audio.sfxRequests?.length || 0); i++) {
-        const sfx = scene.audio.sfxRequests![i];
-        const url = assetUrls[`sfx_${scene.id}_${i}`];
-        if (!url) continue;
-        const buf = await loadBuf(url);
-        if (!buf) continue;
-        const s = audioCtx.createBufferSource();
-        s.buffer = buf;
-        const g = audioCtx.createGain();
-        g.gain.value = sfx.volume;
-        s.connect(g).connect(dest);
-        s.start(audioCtx.currentTime + (scene.frameStart + (sfx.frameOffset || 0)) / FPS);
-      }
+    // Connect VO element with delay
+    if (voRef.current && assetUrls.vo_main) {
+      const source = audioCtx.createMediaElementSource(voRef.current);
+      const gain = audioCtx.createGain();
+      gain.gain.value = scenePlan.audio.mixLevels.voVolume;
+      source.connect(gain).connect(dest);
+      source.connect(audioCtx.destination);
+      voRef.current.currentTime = 0;
+      setTimeout(() => {
+        voRef.current?.play().catch(() => {});
+      }, 3000);
     }
 
+    // SFX: schedule playback (these create new Audio elements)
+    const sfxAudios: HTMLAudioElement[] = [];
+    scenePlan.scenes.forEach((scene) => {
+      (scene.audio.sfxRequests || []).forEach((sfx, idx) => {
+        const key = `sfx_${scene.id}_${idx}`;
+        const url = assetUrls[key];
+        if (!url) return;
+        const sfxTime = (scene.frameStart + (sfx.frameOffset || 0)) / FPS;
+        setTimeout(() => {
+          const audio = new Audio(url);
+          audio.crossOrigin = "anonymous";
+          audio.volume = sfx.volume;
+          sfxAudios.push(audio);
+          try {
+            const src = audioCtx.createMediaElementSource(audio);
+            src.connect(dest);
+            src.connect(audioCtx.destination);
+          } catch { /* ignore if can't connect */ }
+          audio.play().catch(() => {});
+        }, sfxTime * 1000);
+      });
+    });
+
+    // Combine canvas video stream + audio
     const videoStream = canvas.captureStream(30);
-    const audioTrack = dest.stream.getAudioTracks()[0];
-    if (audioTrack) videoStream.addTrack(audioTrack);
+    for (const track of dest.stream.getAudioTracks()) {
+      videoStream.addTrack(track);
+    }
 
     const recorder = new MediaRecorder(videoStream, {
       mimeType: "video/webm;codecs=vp9,opus",
@@ -204,17 +211,30 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
       a.download = "vocito-video.webm";
       a.click();
       URL.revokeObjectURL(a.href);
+      // Cleanup: disconnect audio context (elements can't be reused after createMediaElementSource)
       audioCtx.close();
+      sfxAudios.forEach((a) => { a.pause(); a.src = ""; });
       setRecording(false);
       setRecordProgress(0);
+      // Reload page to reset audio elements (createMediaElementSource is one-time)
+      window.location.reload();
     };
-    recorder.start();
+    recorder.start(1000); // collect data every second
 
+    // Render canvas frames
     const startT = performance.now();
     const renderFrame = () => {
       const elapsed = (performance.now() - startT) / 1000;
-      if (elapsed >= TOTAL_DURATION) { recorder.stop(); return; }
+      if (elapsed >= TOTAL_DURATION) {
+        recorder.stop();
+        musicRef.current?.pause();
+        voRef.current?.pause();
+        return;
+      }
       setRecordProgress(elapsed / TOTAL_DURATION);
+      setCurrentTime(elapsed);
+      setCurrentFrame(Math.floor(elapsed * FPS));
+
       const frame = Math.floor(elapsed * FPS);
       const sc = scenePlan.scenes.find((s) => frame >= s.frameStart && frame < s.frameEnd);
       const sp = sc ? (frame - sc.frameStart) / (sc.frameEnd - sc.frameStart) : 0;
