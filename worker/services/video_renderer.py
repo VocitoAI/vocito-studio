@@ -59,7 +59,8 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
 
     output_path = f"/tmp/render_{run_id}.mp4"
 
-    # Run Remotion CLI with Chromium flags for Docker
+    # Run Remotion CLI
+    # Chromium sandbox disabled via env var (set in Dockerfile)
     cmd = [
         "npx", "remotion", "render",
         "src/Root.tsx",
@@ -67,31 +68,40 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
         output_path,
         f"--props={props_path}",
         "--codec=h264", "--crf=18",
-        "--concurrency=1", "--log=verbose",
-        "--disable-headless",
-        "--chromium-flags=--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu",
+        "--concurrency=1",
+        "--gl=angle-egl",
+        "--log=verbose",
     ]
 
     logger.info(f"[remotion] Running: {' '.join(cmd[:6])}...")
+
+    # Set Chromium flags via env
+    env = {**os.environ, "REMOTION_CHROME_FLAGS": "--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu"}
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=REMOTION_PROJECT_PATH,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
 
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)  # 5 min max
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
-        raise RuntimeError("Remotion render timed out after 5 minutes (likely OOM — need more RAM on Railway)")
+        raise RuntimeError("Remotion render timed out after 5 minutes")
+
+    stdout_text = stdout.decode()[-2000:] if stdout else ""
+    stderr_text = stderr.decode()[-2000:] if stderr else ""
+
+    logger.info(f"[remotion] stdout: {stdout_text[-500:]}")
+    if stderr_text:
+        logger.info(f"[remotion] stderr: {stderr_text[-500:]}")
 
     if process.returncode != 0:
-        error = stderr.decode()[-1000:]
-        logger.error(f"[remotion] Failed: {error}")
-        raise RuntimeError(f"Remotion render failed: {error[-300:]}")
+        raise RuntimeError(f"Remotion render failed (exit {process.returncode}): {stderr_text[-300:]}")
 
     if not Path(output_path).exists():
         raise RuntimeError("Remotion completed but output file missing")
