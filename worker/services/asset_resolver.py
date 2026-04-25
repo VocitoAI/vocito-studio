@@ -65,6 +65,7 @@ class AssetResolver:
                 success_count += 1
             else:
                 failure_count += 1
+                logger.warning(f"[resolver] Music failed: '{music_query}'")
 
             # 2. Resolve SFX per scene
             for scene in scene_plan["scenes"]:
@@ -83,6 +84,7 @@ class AssetResolver:
                         success_count += 1
                     else:
                         failure_count += 1
+                        logger.warning(f"[resolver] SFX failed: '{sfx['searchTerm']}' for {scene['id']}")
 
             # Update final status
             if failure_count == 0:
@@ -172,13 +174,14 @@ class AssetResolver:
             self._link_asset(prompt_id, existing.data[0]["id"], usage_context, scene_id, frame_offset, volume)
             return True
 
-        # Download
-        logger.info(f"[resolver] Downloading ES {asset_type} {es_id}: {chosen.get('title', 'untitled')}")
+        # Download via CDN URL from search results
+        download_url = chosen.get("download_url")
+        if not download_url:
+            logger.error(f"[resolver] No download URL for {es_id}")
+            return False
 
-        if asset_type == "music":
-            audio_bytes = await self.es.download_track(es_id)
-        else:
-            audio_bytes = await self.es.download_sfx(es_id)
+        logger.info(f"[resolver] Downloading ES {asset_type} {es_id}: {chosen.get('title', 'untitled')}")
+        audio_bytes = await self.es.download_audio(download_url)
 
         if not audio_bytes:
             logger.error(f"[resolver] Download failed for {es_id}")
