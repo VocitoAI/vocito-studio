@@ -704,42 +704,47 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
                     </Button>
                   )}
 
-                  {(renderTriggered && !videoRun) && (
-                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Starting render pipeline...</span>
-                    </div>
-                  )}
-
-                  {videoRun?.status === "generating_vo" && (
-                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Generating voice-over...</span>
-                    </div>
-                  )}
-
-                  {videoRun?.status === "rendering" && (
-                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Rendering video...</span>
-                    </div>
-                  )}
-
-                  {videoRun?.status === "completed" && (
+                  {/* Pipeline log — visible during all active states */}
+                  {(renderTriggered || videoRun) && (
                     <div>
-                      <div className="flex items-center gap-2 text-sm text-success mb-3">
-                        <Check className="h-4 w-4" />
-                        <span>VO generated + assets assembled</span>
+                      {/* Status header */}
+                      <div className="flex items-center gap-2 text-sm mb-3">
+                        {videoRun?.status === "completed" ? (
+                          <>
+                            <Check className="h-4 w-4 text-success" />
+                            <span className="text-success font-medium">Pipeline complete</span>
+                          </>
+                        ) : videoRun?.status === "failed" ? (
+                          <>
+                            <span className="text-destructive font-medium">Pipeline failed</span>
+                          </>
+                        ) : (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin text-foreground-muted" />
+                            <span className="text-foreground-muted">
+                              {videoRun?.status === "generating_vo"
+                                ? "Generating voice-over..."
+                                : videoRun?.status === "rendering"
+                                  ? "Assembling assets..."
+                                  : "Starting pipeline..."}
+                            </span>
+                          </>
+                        )}
                       </div>
-                      <p className="text-xs text-foreground-muted">
-                        {videoRun.notes}
-                      </p>
-                    </div>
-                  )}
 
-                  {videoRun?.status === "failed" && (
-                    <div className="text-sm text-destructive">
-                      Render failed: {videoRun.error_message}
+                      {/* Live log */}
+                      {videoRun?.notes && (
+                        <pre className="text-xs font-mono text-foreground-muted bg-ui rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
+                          {videoRun.notes}
+                        </pre>
+                      )}
+
+                      {/* Error detail */}
+                      {videoRun?.status === "failed" && videoRun.error_message && (
+                        <div className="mt-2 text-xs text-destructive font-mono">
+                          {videoRun.error_message}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>

@@ -151,8 +151,15 @@ async def start_render(body: dict):
 
 
 async def _run_render_pipeline(prompt_id: str):
-    """Full pipeline: VO generation → video run record."""
+    """Full pipeline: VO generation → asset assembly."""
     now = datetime.now(timezone.utc).isoformat()
+    pipeline_log: list[str] = []
+
+    def log_step(run_id: str, status: str, message: str, **extra):
+        pipeline_log.append(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}")
+        update = {"status": status, "notes": "\n".join(pipeline_log), **extra}
+        supabase.table("studio_video_runs").update(update).eq("id", run_id).execute()
+        logger.info(f"[render] {message}")
 
     # Create video_run record
     run_row = (
@@ -162,7 +169,8 @@ async def _run_render_pipeline(prompt_id: str):
                 "prompt_id": prompt_id,
                 "status": "generating_vo",
                 "vo_started_at": now,
-                "scene_plan": {},  # Will be filled
+                "scene_plan": {},
+                "notes": "Pipeline starting...",
             }
         )
         .execute()
@@ -172,34 +180,36 @@ async def _run_render_pipeline(prompt_id: str):
 
     try:
         # Fetch scene plan
+        log_step(run_id, "generating_vo", "Fetching scene plan...")
         plan_resp = (
             supabase.table("studio_prompts")
-            .select("scene_plan")
+            .select("scene_plan, language")
             .eq("id", prompt_id)
             .single()
             .execute()
         )
         scene_plan = plan_resp.data["scene_plan"]
+        language = plan_resp.data.get("language", "en")
 
-        # Update run with scene plan
         supabase.table("studio_video_runs").update(
             {"scene_plan": scene_plan}
         ).eq("id", run_id).execute()
 
+        log_step(run_id, "generating_vo", f"Scene plan loaded ({language.upper()}). Starting VO generation...")
+
         # Step 1: Generate VO
         vo_asset_id = await generate_plan_vo(supabase, prompt_id)
-        logger.info(f"[render] VO generated: {vo_asset_id}")
-
-        supabase.table("studio_video_runs").update(
-            {
-                "status": "rendering",
-                "vo_completed_at": datetime.now(timezone.utc).isoformat(),
-                "render_started_at": datetime.now(timezone.utc).isoformat(),
-                "vo_url": vo_asset_id,
-            }
-        ).eq("id", run_id).execute()
+        log_step(
+            run_id, "rendering",
+            f"VO generated successfully (asset {vo_asset_id[:8]}...)",
+            vo_completed_at=datetime.now(timezone.utc).isoformat(),
+            render_started_at=datetime.now(timezone.utc).isoformat(),
+            vo_url=vo_asset_id,
+        )
 
         # Step 2: Build asset URL map
+        log_step(run_id, "rendering", "Building asset URL map...")
+
         asset_links = (
             supabase.table("studio_prompt_assets")
             .select("usage_context, asset:studio_assets(supabase_storage_path, storage_bucket)")
@@ -217,27 +227,25 @@ async def _run_render_pipeline(prompt_id: str):
             signed = supabase.storage.from_(bucket).create_signed_url(path, 7200)
             if signed and signed.get("signedURL"):
                 asset_urls[link["usage_context"]] = signed["signedURL"]
+                log_step(run_id, "rendering", f"  ✓ {link['usage_context']}")
 
-        logger.info(f"[render] Asset URLs built: {list(asset_urls.keys())}")
+        log_step(run_id, "rendering", f"All {len(asset_urls)} asset URLs ready")
 
-        # Step 3: For now, mark as completed with asset URLs stored
-        # Remotion rendering will be added in a follow-up brief
-        supabase.table("studio_video_runs").update(
-            {
-                "status": "completed",
-                "render_completed_at": datetime.now(timezone.utc).isoformat(),
-                "notes": f"VO + assets ready. Asset keys: {', '.join(asset_urls.keys())}. Remotion render pending.",
-            }
-        ).eq("id", run_id).execute()
-
-        logger.info(f"[render] Pipeline completed for run {run_id}")
+        # Step 3: Mark as completed
+        log_step(
+            run_id, "completed",
+            f"Pipeline complete. VO + {len(asset_urls)} assets assembled. Remotion render pending.",
+            render_completed_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     except Exception as e:
         logger.exception(f"[render] Failed for {prompt_id}")
+        pipeline_log.append(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] ERROR: {str(e)[:500]}")
         supabase.table("studio_video_runs").update(
             {
                 "status": "failed",
                 "error_message": str(e)[:1000],
+                "notes": "\n".join(pipeline_log),
             }
         ).eq("id", run_id).execute()
 
