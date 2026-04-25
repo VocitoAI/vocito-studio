@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import type { ScenePlan } from "@/types/scenePlan";
+import { VideoPreview } from "@/components/app/video-preview";
 
 type PlanRecord = {
   id: string;
@@ -726,6 +727,23 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
                       )}
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Video preview — when pipeline complete */}
+            {videoRun?.status === "completed" && scenePlan && (
+              <Card className="mt-4">
+                <CardContent className="p-5">
+                  <p className="label-mono mb-3">VIDEO PREVIEW</p>
+                  <VideoPreview
+                    scenePlan={scenePlan}
+                    assetUrls={Object.fromEntries(
+                      linkedAssets
+                        .filter((l) => l.signed_url)
+                        .map((l) => [l.usage_context, l.signed_url!])
+                    )}
+                  />
                 </CardContent>
               </Card>
             )}
