@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Play, Pause, RotateCcw, Download, Loader2 } from "lucide-react";
+import { Play, Pause, RotateCcw, Download, Loader2, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ScenePlan } from "@/types/scenePlan";
 
@@ -23,6 +23,9 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [downloading, setDownloading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordProgress, setRecordProgress] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const musicRef = useRef<HTMLAudioElement | null>(null);
   const voRef = useRef<HTMLAudioElement | null>(null);
   const sfxRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
@@ -180,6 +183,191 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
     setDownloading(false);
   };
 
+  const handleRecordVideo = async () => {
+    if (recording) return;
+    stopAll();
+    handleReset();
+    setRecording(true);
+    setRecordProgress(0);
+
+    const W = 1920;
+    const H = 1080;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d")!;
+
+    // Audio context for mixing
+    const audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+
+    // Load audio buffers
+    async function loadAudio(url: string): Promise<AudioBuffer | null> {
+      try {
+        const resp = await fetch(url);
+        const buf = await resp.arrayBuffer();
+        return await audioCtx.decodeAudioData(buf);
+      } catch { return null; }
+    }
+
+    const musicBuf = assetUrls.music_main ? await loadAudio(assetUrls.music_main) : null;
+    const voBuf = assetUrls.vo_main ? await loadAudio(assetUrls.vo_main) : null;
+
+    // Start audio sources
+    if (musicBuf) {
+      const src = audioCtx.createBufferSource();
+      src.buffer = musicBuf;
+      const gain = audioCtx.createGain();
+      gain.gain.value = scenePlan.audio.mixLevels.musicDuckedDuringVO;
+      src.connect(gain).connect(dest);
+      src.start(0);
+    }
+    if (voBuf) {
+      const src = audioCtx.createBufferSource();
+      src.buffer = voBuf;
+      const gain = audioCtx.createGain();
+      gain.gain.value = scenePlan.audio.mixLevels.voVolume;
+      src.connect(gain).connect(dest);
+      src.start(audioCtx.currentTime + 3); // 3s delay for scene 1
+    }
+
+    // SFX
+    for (const scene of scenePlan.scenes) {
+      for (let idx = 0; idx < (scene.audio.sfxRequests?.length || 0); idx++) {
+        const sfx = scene.audio.sfxRequests![idx];
+        const key = `sfx_${scene.id}_${idx}`;
+        if (!assetUrls[key]) continue;
+        const buf = await loadAudio(assetUrls[key]);
+        if (!buf) continue;
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        const gain = audioCtx.createGain();
+        gain.gain.value = sfx.volume;
+        src.connect(gain).connect(dest);
+        const sfxTime = (scene.frameStart + (sfx.frameOffset || 0)) / FPS;
+        src.start(audioCtx.currentTime + sfxTime);
+      }
+    }
+
+    // Combine canvas video + audio
+    const videoStream = canvas.captureStream(30);
+    const audioTrack = dest.stream.getAudioTracks()[0];
+    if (audioTrack) videoStream.addTrack(audioTrack);
+
+    const recorder = new MediaRecorder(videoStream, {
+      mimeType: "video/webm;codecs=vp9,opus",
+      videoBitsPerSecond: 5000000,
+    });
+
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: "video/webm" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "vocito-preview.webm";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      audioCtx.close();
+      setRecording(false);
+      setRecordProgress(0);
+    };
+
+    recorder.start();
+
+    // Render loop
+    const startT = performance.now();
+    const renderFrame = () => {
+      const elapsed = (performance.now() - startT) / 1000;
+      if (elapsed >= TOTAL_DURATION) {
+        recorder.stop();
+        return;
+      }
+
+      setRecordProgress(elapsed / TOTAL_DURATION);
+      const frame = Math.floor(elapsed * FPS);
+      const scene = scenePlan.scenes.find(
+        (s) => frame >= s.frameStart && frame < s.frameEnd
+      );
+
+      // Draw background
+      ctx.fillStyle = "#05060a";
+      ctx.fillRect(0, 0, W, H);
+
+      // Draw blob
+      if (scene?.visual.blob) {
+        const b = scene.visual.blob;
+        const sp = scene ? (frame - scene.frameStart) / (scene.frameEnd - scene.frameStart) : 0;
+        let op = b.opacity;
+        let sc = b.scale;
+        if (b.state === "materializing") op = b.opacity * sp;
+        if (b.state === "pulsing") sc += Math.sin(frame / 15) * 0.04;
+        else sc += Math.sin(frame / 30) * 0.02;
+        if (b.state === "fading") op = b.opacity * (1 - sp * 0.7);
+
+        const r = 300 * sc;
+        const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, r);
+        grad.addColorStop(0, `rgba(167,139,255,${op})`);
+        grad.addColorStop(0.5, `rgba(94,234,212,${op * 0.6})`);
+        grad.addColorStop(1, "rgba(5,6,10,0)");
+        ctx.filter = "blur(40px)";
+        ctx.beginPath();
+        ctx.arc(W / 2, H / 2, r, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.filter = "none";
+      }
+
+      // Draw copy
+      if (scene?.visual.copy) {
+        const c = scene.visual.copy;
+        const sp = (frame - scene.frameStart) / (scene.frameEnd - scene.frameStart);
+        const animP = Math.min(1, sp / (c.animationDurationMs / 1000 / scene.durationSeconds));
+        const fontSize = c.size === "xl" ? 72 : c.size === "lg" ? 56 : c.size === "md" ? 42 : 32;
+        ctx.font = `${c.style === "serif_italic" ? "italic " : ""}${fontSize}px ${c.style === "serif_italic" ? "Georgia, serif" : "system-ui, sans-serif"}`;
+        ctx.fillStyle = `rgba(240,244,255,${animP})`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const yOff = c.animation === "fade_up" ? 30 * (1 - animP) : 0;
+        // Word wrap
+        const words = c.text.split(" ");
+        const lines: string[] = [];
+        let line = "";
+        for (const word of words) {
+          const test = line ? line + " " + word : word;
+          if (ctx.measureText(test).width > W * 0.75) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = test;
+          }
+        }
+        if (line) lines.push(line);
+        const lineH = fontSize * 1.3;
+        const startY = H / 2 - ((lines.length - 1) * lineH) / 2 + yOff;
+        lines.forEach((l, i) => ctx.fillText(l, W / 2, startY + i * lineH));
+      }
+
+      // Scene label
+      ctx.font = "20px monospace";
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(scene?.id.replace(/_/g, " ") || "", 30, 30);
+
+      // Timecode
+      const mm = Math.floor(elapsed / 60);
+      const ss = String(Math.floor(elapsed % 60)).padStart(2, "0");
+      ctx.textAlign = "right";
+      ctx.fillText(`${mm}:${ss} / 0:33`, W - 30, 30);
+
+      requestAnimationFrame(renderFrame);
+    };
+
+    requestAnimationFrame(renderFrame);
+  };
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -335,20 +523,36 @@ export function VideoPreview({ scenePlan, assetUrls }: VideoPreviewProps) {
         </span>
       </div>
 
+      {/* Recording progress */}
+      {recording && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2 text-sm text-foreground-muted mb-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Recording video... {Math.round(recordProgress * 100)}%</span>
+          </div>
+          <div className="w-full h-1.5 bg-ui rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent transition-all duration-200"
+              style={{ width: `${recordProgress * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Download buttons */}
       <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
         <Button
           variant="accent"
           size="sm"
-          onClick={handleDownloadAll}
-          disabled={downloading}
+          onClick={handleRecordVideo}
+          disabled={recording || downloading}
         >
-          {downloading ? (
+          {recording ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Download className="h-3.5 w-3.5" />
+            <Film className="h-3.5 w-3.5" />
           )}
-          Download all assets
+          {recording ? "Recording..." : "Download video"}
         </Button>
         {assetUrls.vo_main && (
           <Button
