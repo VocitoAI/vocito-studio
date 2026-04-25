@@ -63,7 +63,7 @@ async def asset_poll_loop():
 
 
 async def render_poll_loop():
-    """Poll for approved plans with ready assets that have no video run yet."""
+    """Poll for approved plans with ready assets → auto-render."""
     logger.info("Render poll loop started")
     while True:
         try:
@@ -78,21 +78,25 @@ async def render_poll_loop():
                 .execute()
             )
 
-            if response.data:
-                for plan in response.data:
-                    prompt_id = plan["id"]
+            for plan in response.data or []:
+                prompt_id = plan["id"]
 
-                    # Check if a video run already exists for this plan
-                    existing = (
-                        supabase.table("studio_video_runs")
-                        .select("id")
-                        .eq("prompt_id", prompt_id)
-                        .limit(1)
-                        .execute()
-                    )
+                # Idempotency: skip if any video run exists (any status)
+                existing = (
+                    supabase.table("studio_video_runs")
+                    .select("id, status")
+                    .eq("prompt_id", prompt_id)
+                    .limit(1)
+                    .execute()
+                )
 
-                    if not existing.data:
-                        logger.info(f"[render-poll] Plan {prompt_id} ready but no render triggered yet — waiting for manual trigger")
+                if existing.data:
+                    # Already has a run — skip
+                    continue
+
+                # Claim: create the run immediately to prevent duplicates
+                logger.info(f"[render-poll] Found plan {prompt_id}, starting render")
+                await _run_render_pipeline(prompt_id)
 
         except Exception as e:
             logger.error(f"[render-poll] Error: {e}", exc_info=True)
@@ -138,56 +142,61 @@ async def webhook_plan_approved(body: dict):
 
 @app.post("/jobs/render/start")
 async def start_render(body: dict):
-    """Triggered when user clicks Render. Generates VO + creates video run."""
+    """Manual render trigger (kept for compatibility, poll loop handles auto)."""
     prompt_id = body.get("promptId")
     if not prompt_id:
         return JSONResponse({"error": "promptId required"}, status_code=400)
 
-    logger.info(f"[render] Render requested for prompt {prompt_id}")
+    logger.info(f"[render] Manual render requested for {prompt_id}")
+
+    # Check if run already exists
+    existing = (
+        supabase.table("studio_video_runs")
+        .select("id")
+        .eq("prompt_id", prompt_id)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return JSONResponse({"message": "Run already exists", "runId": existing.data[0]["id"]})
 
     asyncio.create_task(_run_render_pipeline(prompt_id))
-
     return JSONResponse({"message": "Render started", "promptId": prompt_id})
 
 
 async def _run_render_pipeline(prompt_id: str):
     """Full pipeline: VO generation → asset assembly."""
     now = datetime.now(timezone.utc).isoformat()
-    pipeline_log: list[str] = []
 
-    def log_step(run_id: str, status: str, message: str, **extra):
-        pipeline_log.append(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}")
-        # Only use columns that exist in the A3 schema
-        update: dict = {"status": status, "current_step": message}
-        # Store full log in error_message field temporarily (notes doesn't exist)
-        update["error_message"] = "\n".join(pipeline_log) if status == "failed" else None
-        for k, v in extra.items():
-            if k in ("started_at", "completed_at", "vo_url", "output_url", "progress_percent"):
-                update[k] = v
-        supabase.table("studio_video_runs").update(update).eq("id", run_id).execute()
-        logger.info(f"[render] {message}")
+    def update_run(run_id: str, **fields):
+        supabase.table("studio_video_runs").update(fields).eq("id", run_id).execute()
 
-    # Create video_run record (A3 schema: scene_plan is NOT NULL)
-    run_row = (
-        supabase.table("studio_video_runs")
-        .insert(
-            {
-                "prompt_id": prompt_id,
-                "status": "generating_vo",
-                "started_at": now,
-                "scene_plan": {"pending": True},
-                "current_step": "Pipeline starting...",
-                "progress_percent": 5,
-            }
+    # Create video_run record (claims this plan)
+    try:
+        run_row = (
+            supabase.table("studio_video_runs")
+            .insert(
+                {
+                    "prompt_id": prompt_id,
+                    "status": "generating_vo",
+                    "started_at": now,
+                    "scene_plan": {"pending": True},
+                    "current_step": "Pipeline starting...",
+                    "progress_percent": 5,
+                }
+            )
+            .execute()
         )
-        .execute()
-    )
+    except Exception as e:
+        logger.error(f"[render] Failed to create video_run for {prompt_id}: {e}")
+        return
+
     run_id = run_row.data[0]["id"]
-    logger.info(f"[render] Created video run {run_id}")
+    logger.info(f"[render-poll] Created video_run {run_id} for plan {prompt_id}")
 
     try:
         # Fetch scene plan
-        log_step(run_id, "generating_vo", "Fetching scene plan...")
+        update_run(run_id, current_step="Fetching scene plan...", progress_percent=10)
         plan_resp = (
             supabase.table("studio_prompts")
             .select("scene_plan, language")
@@ -198,24 +207,29 @@ async def _run_render_pipeline(prompt_id: str):
         scene_plan = plan_resp.data["scene_plan"]
         language = plan_resp.data.get("language", "en")
 
-        supabase.table("studio_video_runs").update(
-            {"scene_plan": scene_plan}
-        ).eq("id", run_id).execute()
-
-        log_step(run_id, "generating_vo", f"Scene plan loaded ({language.upper()}). Starting VO generation...")
+        update_run(run_id, scene_plan=scene_plan)
+        logger.info(f"[render-poll] Scene plan loaded ({language.upper()})")
 
         # Step 1: Generate VO
+        update_run(
+            run_id,
+            current_step=f"Generating voice-over ({language.upper()})...",
+            progress_percent=20,
+        )
+        logger.info(f"[render-poll] VO generation start for {prompt_id}")
+
         vo_asset_id = await generate_plan_vo(supabase, prompt_id)
-        log_step(
-            run_id, "rendering",
-            f"VO generated successfully (asset {vo_asset_id[:8]}...)",
+
+        logger.info(f"[render-poll] VO generation complete: {vo_asset_id}")
+        update_run(
+            run_id,
+            status="rendering",
+            current_step="VO generated. Building asset URLs...",
             vo_url=vo_asset_id,
-            progress_percent=50,
+            progress_percent=60,
         )
 
         # Step 2: Build asset URL map
-        log_step(run_id, "rendering", "Building asset URL map...")
-
         asset_links = (
             supabase.table("studio_prompt_assets")
             .select("usage_context, asset:studio_assets(supabase_storage_path, storage_bucket)")
@@ -223,38 +237,40 @@ async def _run_render_pipeline(prompt_id: str):
             .execute()
         )
 
-        asset_urls = {}
+        asset_count = 0
         for link in asset_links.data or []:
             asset = link.get("asset")
-            if not asset or not asset.get("supabase_storage_path"):
-                continue
-            bucket = asset.get("storage_bucket", "studio-assets")
-            path = asset["supabase_storage_path"]
-            signed = supabase.storage.from_(bucket).create_signed_url(path, 7200)
-            if signed and signed.get("signedURL"):
-                asset_urls[link["usage_context"]] = signed["signedURL"]
-                log_step(run_id, "rendering", f"  ✓ {link['usage_context']}")
+            if asset and asset.get("supabase_storage_path"):
+                asset_count += 1
 
-        log_step(run_id, "rendering", f"All {len(asset_urls)} asset URLs ready")
+        update_run(
+            run_id,
+            current_step=f"All {asset_count} asset URLs assembled",
+            progress_percent=90,
+        )
+        logger.info(f"[render-poll] {asset_count} asset URLs ready")
 
         # Step 3: Mark as completed
-        log_step(
-            run_id, "completed",
-            f"Pipeline complete. VO + {len(asset_urls)} assets assembled. Remotion render pending.",
+        update_run(
+            run_id,
+            status="completed",
+            current_step=f"Pipeline complete. VO + {asset_count} assets ready.",
             completed_at=datetime.now(timezone.utc).isoformat(),
             progress_percent=100,
         )
+        logger.info(f"[render-poll] Render pipeline complete for {run_id}")
 
     except Exception as e:
         logger.exception(f"[render] Failed for {prompt_id}")
-        pipeline_log.append(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] ERROR: {str(e)[:500]}")
-        supabase.table("studio_video_runs").update(
-            {
-                "status": "failed",
-                "error_message": str(e)[:1000],
-                "notes": "\n".join(pipeline_log),
-            }
-        ).eq("id", run_id).execute()
+        try:
+            update_run(
+                run_id,
+                status="failed",
+                error_message=str(e)[:1000],
+                current_step="Pipeline failed",
+            )
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -66,17 +66,13 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [submitting, setSubmitting] = useState(false);
   const [videoRun, setVideoRun] = useState<VideoRun | null>(null);
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([]);
-  const [renderTriggered, setRenderTriggered] = useState(false);
   const router = useRouter();
 
   const fetchRun = () => {
     fetch(`/api/plan/${plan.id}/runs`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.run) {
-          setVideoRun(d.run);
-          if (!renderTriggered) setRenderTriggered(true);
-        }
+        if (d.run) setVideoRun(d.run);
       })
       .catch(() => {});
   };
@@ -94,15 +90,15 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
     }
   }, [plan.status, plan.assets_status, router]);
 
-  // Poll for render progress — always poll if render was triggered and not done
+  // Poll for render progress — always poll if assets ready and no final status
   useEffect(() => {
-    if (!renderTriggered) return;
+    if (plan.status !== "plan_approved" || plan.assets_status !== "ready") return;
     if (videoRun?.status === "completed" || videoRun?.status === "failed") return;
 
     const interval = setInterval(fetchRun, 2000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderTriggered, videoRun?.status, plan.id]);
+  }, [plan.status, plan.assets_status, videoRun?.status, plan.id]);
 
   // Fetch linked assets when ready
   useEffect(() => {
@@ -120,19 +116,6 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.id]);
 
-  const handleStartRender = async () => {
-    setSubmitting(true);
-    setRenderTriggered(true);
-    try {
-      await fetch(`/api/plan/${plan.id}/render`, { method: "POST" });
-    } catch (err) {
-      console.error("Render trigger failed:", err);
-    }
-    setSubmitting(false);
-    // Start polling immediately
-    setTimeout(fetchRun, 1000);
-    setTimeout(fetchRun, 3000);
-  };
 
   const scenePlan = plan.scene_plan;
 
@@ -678,29 +661,20 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
               </CardContent>
             </Card>
 
-            {/* Render section */}
+            {/* Render section — auto-triggered, read-only status */}
             {plan.assets_status === "ready" && (
               <Card>
                 <CardContent className="p-5">
-                  <p className="label-mono mb-3">RENDER</p>
+                  <p className="label-mono mb-3">RENDER PIPELINE</p>
 
-                  {!videoRun && !renderTriggered && (
-                    <Button
-                      variant="accent"
-                      onClick={handleStartRender}
-                      disabled={submitting}
-                    >
-                      {submitting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                      Generate VO &amp; Render
-                    </Button>
+                  {!videoRun && (
+                    <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Waiting for worker to pick up render job...</span>
+                    </div>
                   )}
 
-                  {/* Pipeline log — visible during all active states */}
-                  {(renderTriggered || videoRun) && (
+                  {videoRun && (
                     <div>
                       {/* Status header */}
                       <div className="flex items-center gap-2 text-sm mb-3">
