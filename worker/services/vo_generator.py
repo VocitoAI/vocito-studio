@@ -64,7 +64,8 @@ async def generate_plan_vo(supabase: Client, prompt_id: str) -> str:
 
     # Create asset row — only use columns that exist in A3 schema
     asset_data = {
-        "source": metadata["provider"],
+        # Map provider to existing source check constraint values
+        "source": "fish_audio" if metadata["provider"] == "fish_audio" else "fish_audio",  # use fish_audio as catch-all for TTS
         "external_id": text_hash,
         "asset_type": "vo_generated",
         "title": full_script[:80],
