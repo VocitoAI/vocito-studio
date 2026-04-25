@@ -16,6 +16,7 @@ import {
   Volume2,
   Sparkles,
   Check,
+  Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -731,19 +732,43 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
               </Card>
             )}
 
-            {/* Video preview — when pipeline complete */}
+            {/* Video — when pipeline complete */}
             {videoRun?.status === "completed" && scenePlan && (
               <Card className="mt-4">
                 <CardContent className="p-5">
-                  <p className="label-mono mb-3">VIDEO PREVIEW</p>
-                  <VideoPreview
-                    scenePlan={scenePlan}
-                    assetUrls={Object.fromEntries(
-                      linkedAssets
-                        .filter((l) => l.signed_url)
-                        .map((l) => [l.usage_context, l.signed_url!])
-                    )}
-                  />
+                  <p className="label-mono mb-3">VIDEO</p>
+
+                  {/* Server-rendered MP4 */}
+                  {videoRun.signed_url ? (
+                    <div>
+                      <video
+                        src={videoRun.signed_url}
+                        controls
+                        className="w-full rounded-lg"
+                        style={{ maxHeight: 600 }}
+                      />
+                      <div className="flex items-center gap-2 mt-3">
+                        <a
+                          href={videoRun.signed_url}
+                          download="vocito-video.mp4"
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-background text-sm font-medium hover:bg-accent/90 transition-colors"
+                        >
+                          <Download className="h-4 w-4" />
+                          Download MP4
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Fallback: browser preview if no server render yet */
+                    <VideoPreview
+                      scenePlan={scenePlan}
+                      assetUrls={Object.fromEntries(
+                        linkedAssets
+                          .filter((l) => l.signed_url)
+                          .map((l) => [l.usage_context, l.signed_url!])
+                      )}
+                    />
+                  )}
                 </CardContent>
               </Card>
             )}

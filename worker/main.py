@@ -15,6 +15,7 @@ from supabase import create_client, Client
 
 from services.asset_resolver import AssetResolver
 from services.vo_generator import generate_plan_vo
+from services.video_renderer import render_video
 
 logging.basicConfig(
     level=logging.INFO,
@@ -245,20 +246,24 @@ async def _run_render_pipeline(prompt_id: str):
 
         update_run(
             run_id,
-            current_step=f"All {asset_count} asset URLs assembled",
-            progress_percent=90,
+            current_step=f"All {asset_count} assets ready. Rendering video...",
+            progress_percent=70,
         )
-        logger.info(f"[render-poll] {asset_count} asset URLs ready")
+        logger.info(f"[render-poll] {asset_count} assets ready, starting ffmpeg render")
 
-        # Step 3: Mark as completed
+        # Step 3: Render MP4 with ffmpeg
+        storage_path = await render_video(supabase, prompt_id, run_id)
+
+        # Step 4: Mark as completed with video URL
         update_run(
             run_id,
             status="completed",
-            current_step=f"Pipeline complete. VO + {asset_count} assets ready.",
+            current_step="Video rendered. Ready to download.",
             completed_at=datetime.now(timezone.utc).isoformat(),
             progress_percent=100,
+            output_url=storage_path,
         )
-        logger.info(f"[render-poll] Render pipeline complete for {run_id}")
+        logger.info(f"[render-poll] Render complete: {storage_path}")
 
     except Exception as e:
         logger.exception(f"[render] Failed for {prompt_id}")
