@@ -62,7 +62,9 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
     # Run Remotion CLI
     cmd = [
         "npx", "remotion", "render",
-        "VocitoLaunchVideo", output_path,
+        "src/Root.tsx",
+        "VocitoLaunchVideo",
+        output_path,
         f"--props={props_path}",
         "--codec=h264", "--crf=18",
         "--concurrency=1", "--log=info",
