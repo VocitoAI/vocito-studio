@@ -1,4 +1,8 @@
-import { AbsoluteFill, Audio, Sequence } from "remotion";
+import { useState, useEffect } from "react";
+import { AbsoluteFill, Audio, Sequence, continueRender, delayRender } from "remotion";
+import { loadFonts } from "../fonts";
+import { waitUntilDone as waitFraunces } from "../fonts/fraunces";
+import { FilmGrain } from "../components/FilmGrain";
 import { Scene1Materializes } from "../scenes/Scene1Materializes";
 import { Scene2Pain01 } from "../scenes/Scene2Pain01";
 import { Scene3Pain02 } from "../scenes/Scene3Pain02";
@@ -13,75 +17,78 @@ type Props = {
   assetUrls: Record<string, string>;
 };
 
-const SCENE_BOUNDARIES = [
-  { id: "scene1_materializes", from: 0, duration: 90, Component: Scene1Materializes },
-  { id: "scene2_pain_01", from: 90, duration: 90, Component: Scene2Pain01 },
-  { id: "scene3_pain_02", from: 180, duration: 90, Component: Scene3Pain02 },
-  { id: "scene4_action", from: 270, duration: 180, Component: Scene4Action },
-  { id: "scene5_promise_01", from: 450, duration: 120, Component: Scene5Promise01 },
-  { id: "scene6_promise_02", from: 570, duration: 120, Component: Scene6Promise02 },
-  { id: "scene7_tagline", from: 690, duration: 180, Component: Scene7Tagline },
-  { id: "scene8_wordmark", from: 870, duration: 120, Component: Scene8Wordmark },
+const SCENES = [
+  { id: "scene1_materializes", from: 0, dur: 90, C: Scene1Materializes },
+  { id: "scene2_pain_01", from: 90, dur: 90, C: Scene2Pain01 },
+  { id: "scene3_pain_02", from: 180, dur: 90, C: Scene3Pain02 },
+  { id: "scene4_action", from: 270, dur: 180, C: Scene4Action },
+  { id: "scene5_promise_01", from: 450, dur: 120, C: Scene5Promise01 },
+  { id: "scene6_promise_02", from: 570, dur: 120, C: Scene6Promise02 },
+  { id: "scene7_tagline", from: 690, dur: 180, C: Scene7Tagline },
+  { id: "scene8_wordmark", from: 870, dur: 120, C: Scene8Wordmark },
 ];
 
 export const VocitoLaunchVideo: React.FC<Props> = ({ scenePlan, assetUrls }) => {
-  if (!scenePlan) return null;
+  const [ready, setReady] = useState(false);
+  const [handle] = useState(() => delayRender("Loading fonts"));
 
-  const sceneById = (id: string) => scenePlan.scenes.find((s: any) => s.id === id);
+  useEffect(() => {
+    Promise.all([loadFonts(), waitFraunces()])
+      .then(() => { setReady(true); continueRender(handle); })
+      .catch(() => { continueRender(handle); });
+  }, [handle]);
+
+  if (!scenePlan || !ready) return null;
+
+  const byId = (id: string) => scenePlan.scenes.find((s: any) => s.id === id);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#05060a" }}>
-      {/* Music — full duration with ducking */}
+      {/* Background depth */}
+      <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, #0a0d18 0%, #05060a 70%)" }} />
+
+      {/* Music */}
       {assetUrls.music_main && (
-        <Audio
-          src={assetUrls.music_main}
-          volume={(f) => {
-            const base = scenePlan.audio.mixLevels.musicBase ?? 0.55;
-            const ducked = scenePlan.audio.mixLevels.musicDuckedDuringVO ?? 0.28;
-            if (f < 90 || f >= 870) return base;
-            return ducked;
-          }}
-        />
+        <Audio src={assetUrls.music_main} volume={(f) => {
+          const base = scenePlan.audio.mixLevels.musicBase ?? 0.55;
+          const ducked = scenePlan.audio.mixLevels.musicDuckedDuringVO ?? 0.28;
+          return f < 90 || f >= 870 ? base : ducked;
+        }} />
       )}
 
-      {/* Voiceover — starts at scene 2 */}
+      {/* VO — starts at scene 2 */}
       {assetUrls.vo_main && (
         <Sequence from={90} durationInFrames={900}>
-          <Audio
-            src={assetUrls.vo_main}
-            volume={scenePlan.audio.mixLevels.voVolume ?? 1.0}
-          />
+          <Audio src={assetUrls.vo_main} volume={scenePlan.audio.mixLevels.voVolume ?? 1.0} />
         </Sequence>
       )}
 
-      {/* SFX per scene */}
+      {/* SFX */}
       {scenePlan.scenes.map((scene: any) =>
         (scene.audio.sfxRequests || []).map((sfx: any, idx: number) => {
           const key = `sfx_${scene.id}_${idx}`;
-          const url = assetUrls[key];
-          if (!url) return null;
+          if (!assetUrls[key]) return null;
           return (
-            <Sequence
-              key={key}
-              from={scene.frameStart + (sfx.frameOffset || 0)}
-              durationInFrames={150}
-            >
-              <Audio src={url} volume={sfx.volume ?? 0.35} />
+            <Sequence key={key} from={scene.frameStart + (sfx.frameOffset || 0)} durationInFrames={150}>
+              <Audio src={assetUrls[key]} volume={sfx.volume ?? 0.35} />
             </Sequence>
           );
         })
       )}
 
       {/* Scene visuals */}
-      {SCENE_BOUNDARIES.map(({ id, from, duration, Component }) => {
-        const scene = sceneById(id);
+      {SCENES.map(({ id, from, dur, C }) => {
+        const scene = byId(id);
         if (!scene) return null;
         return (
-          <Sequence key={id} from={from} durationInFrames={duration}>
-            <Component scene={scene} brand={scenePlan.meta.brand} />
+          <Sequence key={id} from={from} durationInFrames={dur}>
+            <C scene={scene} brand={scenePlan.meta.brand} />
           </Sequence>
         );
       })}
+
+      {/* Film grain overlay */}
+      <FilmGrain opacity={0.035} />
     </AbsoluteFill>
   );
 };

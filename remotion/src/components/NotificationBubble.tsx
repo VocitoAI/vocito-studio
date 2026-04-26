@@ -1,35 +1,56 @@
-import { interpolate, spring, useVideoConfig } from "remotion";
+import { interpolate, useVideoConfig, Easing } from "remotion";
+import { SATOSHI_FAMILY } from "../fonts";
 
 type Props = {
   content: string;
   showFromFrame: number;
   showUntilFrame: number;
-  yOffset?: number;
-  localFrame: number;
+  index: number;
+  globalFrame: number;
 };
 
 export const NotificationBubble: React.FC<Props> = ({
-  content, showFromFrame, showUntilFrame, yOffset = 0, localFrame,
+  content, showFromFrame, showUntilFrame, index, globalFrame,
 }) => {
-  const { fps } = useVideoConfig();
-  if (localFrame < showFromFrame || localFrame > showUntilFrame) return null;
+  if (globalFrame < showFromFrame || globalFrame > showUntilFrame) return null;
 
-  const f = localFrame - showFromFrame;
-  const slideIn = spring({ frame: f, fps, from: -100, to: 0, config: { damping: 200 } });
-  const opacity = interpolate(f, [0, 15], [0, 1], { extrapolateRight: "clamp" });
+  const localFrame = globalFrame - showFromFrame;
+  const totalDuration = showUntilFrame - showFromFrame;
+
+  const slideY = interpolate(localFrame, [0, 18], [-40, 0], {
+    extrapolateRight: "clamp",
+    easing: Easing.bezier(0.16, 1, 0.3, 1),
+  });
+  const fadeIn = interpolate(localFrame, [0, 15], [0, 1], { extrapolateRight: "clamp" });
+  const fadeOut = interpolate(localFrame, [totalDuration - 12, totalDuration], [1, 0], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp",
+  });
 
   return (
     <div style={{
-      position: "absolute", top: 120 + yOffset, left: "50%",
-      transform: `translateX(calc(-50% + ${slideIn}px))`,
-      opacity, background: "rgba(255,255,255,0.08)",
-      backdropFilter: "blur(20px)",
-      border: "1px solid rgba(255,255,255,0.12)",
-      borderRadius: 16, padding: "16px 24px",
-      fontFamily: "system-ui, sans-serif", fontSize: 24,
-      color: "rgba(255,255,255,0.85)", letterSpacing: "-0.01em",
+      position: "absolute",
+      top: 180 + index * 110,
+      left: "50%",
+      transform: `translate(-50%, ${slideY}px)`,
+      opacity: Math.min(fadeIn, fadeOut),
+      zIndex: 100,
+      background: "rgba(15,18,28,0.85)",
+      border: "1px solid rgba(255,255,255,0.10)",
+      borderRadius: 18,
+      padding: "18px 28px",
+      fontFamily: `'${SATOSHI_FAMILY}', system-ui, sans-serif`,
+      fontSize: 28,
+      fontWeight: 500,
+      color: "rgba(255,255,255,0.92)",
+      letterSpacing: "-0.01em",
+      boxShadow: "0 16px 48px -12px rgba(0,0,0,0.5)",
+      minWidth: 380,
+      display: "flex",
+      alignItems: "center",
+      gap: 14,
     }}>
-      {content}
+      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+      <span>{content}</span>
     </div>
   );
 };
