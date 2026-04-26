@@ -72,6 +72,7 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([]);
   const [iterations, setIterations] = useState<any[]>([]);
   const [activeIterationId, setActiveIterationId] = useState<string | null>(null);
+  const [stableVideoSrc, setStableVideoSrc] = useState<string | null>(null);
   const router = useRouter();
 
   const fetchRun = () => {
@@ -89,13 +90,22 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
       .then((d) => {
         const iters = d.iterations || [];
         setIterations(iters);
-        // Set active to newest completed or approved
         const active = iters.find((i: any) => i.review_decision === "approved")
           || iters.find((i: any) => !i.review_decision && i.status === "completed")
           || iters[0];
-        if (active && !activeIterationId) setActiveIterationId(active.id);
-        // Update videoRun to match active
-        if (active) setVideoRun(active);
+        if (active && !activeIterationId) {
+          setActiveIterationId(active.id);
+          setVideoRun(active);
+          if (active.signed_url) setStableVideoSrc(active.signed_url);
+        }
+        // Only update videoRun if the active iteration changed status (not on every poll)
+        if (active && activeIterationId === active.id) {
+          // Update status fields but preserve signed_url to avoid video remount
+          setVideoRun((prev) => {
+            if (!prev || prev.id !== active.id) return active;
+            return { ...active, signed_url: prev.signed_url || active.signed_url };
+          });
+        }
       })
       .catch(() => {});
   };
@@ -133,13 +143,23 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
     }
   }, [plan.id, plan.assets_status]);
 
-  // Fetch iterations on load + poll
+  // Fetch iterations on load
   useEffect(() => {
     fetchIterations();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.id]);
+
+  // Only poll when there's an active pipeline (not completed/failed)
+  useEffect(() => {
+    const hasActive = iterations.some((i) =>
+      ["pending", "generating_vo", "rendering"].includes(i.status)
+    );
+    if (!hasActive && iterations.length > 0) return;
+
     const interval = setInterval(fetchIterations, 5000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan.id]);
+  }, [iterations, plan.id]);
 
 
   const scenePlan = plan.scene_plan;
@@ -776,7 +796,8 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
                       )}
                     </div>
                     <video
-                      src={videoRun.signed_url}
+                      key={videoRun.id}
+                      src={stableVideoSrc || videoRun.signed_url}
                       controls
                       playsInline
                       className="w-full rounded-lg bg-black"
@@ -801,7 +822,10 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
                       onSelect={(id) => {
                         setActiveIterationId(id);
                         const iter = iterations.find((i: any) => i.id === id);
-                        if (iter) setVideoRun(iter);
+                        if (iter) {
+                          setVideoRun(iter);
+                          if (iter.signed_url) setStableVideoSrc(iter.signed_url);
+                        }
                       }}
                     />
                   </div>
