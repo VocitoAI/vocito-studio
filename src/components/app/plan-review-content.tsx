@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import type { ScenePlan } from "@/types/scenePlan";
-// VideoPreview removed — replaced by server-rendered MP4
+import { RenderReview } from "@/components/render/RenderReview";
+import { IterationHistory } from "@/components/render/IterationHistory";
 
 type PlanRecord = {
   id: string;
@@ -69,6 +70,8 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
   const [submitting, setSubmitting] = useState(false);
   const [videoRun, setVideoRun] = useState<VideoRun | null>(null);
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([]);
+  const [iterations, setIterations] = useState<any[]>([]);
+  const [activeIterationId, setActiveIterationId] = useState<string | null>(null);
   const router = useRouter();
 
   const fetchRun = () => {
@@ -76,6 +79,23 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
       .then((r) => r.json())
       .then((d) => {
         if (d.run) setVideoRun(d.run);
+      })
+      .catch(() => {});
+  };
+
+  const fetchIterations = () => {
+    fetch(`/api/plan/${plan.id}/iterations`)
+      .then((r) => r.json())
+      .then((d) => {
+        const iters = d.iterations || [];
+        setIterations(iters);
+        // Set active to newest completed or approved
+        const active = iters.find((i: any) => i.review_decision === "approved")
+          || iters.find((i: any) => !i.review_decision && i.status === "completed")
+          || iters[0];
+        if (active && !activeIterationId) setActiveIterationId(active.id);
+        // Update videoRun to match active
+        if (active) setVideoRun(active);
       })
       .catch(() => {});
   };
@@ -113,9 +133,11 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
     }
   }, [plan.id, plan.assets_status]);
 
-  // Fetch existing video run on load
+  // Fetch iterations on load + poll
   useEffect(() => {
-    fetchRun();
+    fetchIterations();
+    const interval = setInterval(fetchIterations, 5000);
+    return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan.id]);
 
@@ -733,30 +755,58 @@ export function PlanReviewContent({ plan }: { plan: PlanRecord }) {
               </Card>
             )}
 
-            {/* Video — server-rendered MP4 */}
+            {/* Video — server-rendered MP4 with review + iterations */}
             {videoRun?.status === "completed" && videoRun.signed_url && (
-              <Card className="mt-4">
-                <CardContent className="p-5">
-                  <p className="label-mono mb-3">VIDEO</p>
-                  <video
-                    src={videoRun.signed_url}
-                    controls
-                    playsInline
-                    className="w-full rounded-lg bg-black"
-                    style={{ aspectRatio: "16 / 9" }}
+              <>
+                <Card className="mt-4">
+                  <CardContent className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="label-mono">
+                        {(videoRun as any).iteration_label || "VIDEO"}
+                      </p>
+                      {videoRun.signed_url && (
+                        <a
+                          href={videoRun.signed_url}
+                          download={`vocito-${(videoRun as any).iteration_label || "v1"}.mp4`}
+                          className="inline-flex items-center gap-1.5 text-xs text-accent hover:underline"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download MP4
+                        </a>
+                      )}
+                    </div>
+                    <video
+                      src={videoRun.signed_url}
+                      controls
+                      playsInline
+                      className="w-full rounded-lg bg-black"
+                      style={{ aspectRatio: "16 / 9" }}
+                    />
+                  </CardContent>
+                </Card>
+
+                <div className="mt-4">
+                  <RenderReview
+                    run={videoRun as any}
+                    onApproved={fetchIterations}
+                    onRejected={fetchIterations}
                   />
-                  <div className="mt-3 flex items-center gap-3">
-                    <a
-                      href={videoRun.signed_url}
-                      download={`vocito-launch-${videoRun.id}.mp4`}
-                      className="inline-flex items-center gap-2 rounded-lg bg-accent text-background hover:bg-accent/90 h-10 px-4 text-sm font-medium transition-all"
-                    >
-                      <Download className="h-4 w-4" />
-                      Download MP4
-                    </a>
+                </div>
+
+                {iterations.length > 1 && (
+                  <div className="mt-4">
+                    <IterationHistory
+                      iterations={iterations}
+                      activeRunId={activeIterationId || videoRun.id}
+                      onSelect={(id) => {
+                        setActiveIterationId(id);
+                        const iter = iterations.find((i: any) => i.id === id);
+                        if (iter) setVideoRun(iter);
+                      }}
+                    />
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </>
             )}
           </>
         )}

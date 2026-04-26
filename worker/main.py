@@ -16,6 +16,7 @@ from supabase import create_client, Client
 from services.asset_resolver import AssetResolver
 from services.vo_generator import generate_plan_vo
 from services.video_renderer import render_video
+from services.iteration_pipeline import create_iteration
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,6 +144,19 @@ async def webhook_plan_approved(body: dict):
     asyncio.create_task(asset_resolver.resolve(prompt_id))
 
     return JSONResponse({"message": "Asset resolution triggered"})
+
+
+@app.post("/jobs/iterate/start")
+async def start_iteration(body: dict):
+    """Triggered when user rejects a render with feedback."""
+    parent_run_id = body.get("parentRunId")
+    if not parent_run_id:
+        return JSONResponse({"error": "parentRunId required"}, status_code=400)
+
+    logger.info(f"[iteration] Iteration requested for parent {parent_run_id}")
+    asyncio.create_task(create_iteration(supabase, parent_run_id))
+
+    return JSONResponse({"message": "Iteration started", "parentRunId": parent_run_id})
 
 
 @app.post("/jobs/render/start")
