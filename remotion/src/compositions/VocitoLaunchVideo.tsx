@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { AbsoluteFill, Audio, Sequence, continueRender, delayRender } from "remotion";
 import { loadFonts } from "../fonts";
 import { waitUntilDone as waitFraunces } from "../fonts/fraunces";
+import { calculateMusicVolume, calculateVoVolume, calculateSfxVolume } from "../lib/audio-helpers";
 import { FilmGrain } from "../components/FilmGrain";
 import { Scene1Materializes } from "../scenes/Scene1Materializes";
 import { Scene2Pain01 } from "../scenes/Scene2Pain01";
@@ -47,30 +48,28 @@ export const VocitoLaunchVideo: React.FC<Props> = ({ scenePlan, assetUrls }) => 
       {/* Background depth */}
       <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, #0a0d18 0%, #05060a 70%)" }} />
 
-      {/* Music */}
+      {/* Music — smooth ducking via hardcoded mix constants */}
       {assetUrls.music_main && (
-        <Audio src={assetUrls.music_main} volume={(f) => {
-          const base = scenePlan.audio.mixLevels.musicBase ?? 0.55;
-          const ducked = scenePlan.audio.mixLevels.musicDuckedDuringVO ?? 0.28;
-          return f < 90 || f >= 870 ? base : ducked;
-        }} />
+        <Audio src={assetUrls.music_main} volume={(f) => calculateMusicVolume(f)} />
       )}
 
-      {/* VO — starts at scene 2 */}
+      {/* VO — with scene 4 hero boost */}
       {assetUrls.vo_main && (
         <Sequence from={90} durationInFrames={900}>
-          <Audio src={assetUrls.vo_main} volume={scenePlan.audio.mixLevels.voVolume ?? 1.0} />
+          <Audio src={assetUrls.vo_main} volume={(f) => calculateVoVolume(f + 90)} />
         </Sequence>
       )}
 
-      {/* SFX */}
+      {/* SFX — globally reduced + ducked during VO */}
       {scenePlan.scenes.map((scene: any) =>
         (scene.audio.sfxRequests || []).map((sfx: any, idx: number) => {
           const key = `sfx_${scene.id}_${idx}`;
           if (!assetUrls[key]) return null;
+          const sfxStart = scene.frameStart + (sfx.frameOffset || 0);
+          const vol = calculateSfxVolume(sfxStart, sfx.volume ?? 0.35);
           return (
-            <Sequence key={key} from={scene.frameStart + (sfx.frameOffset || 0)} durationInFrames={150}>
-              <Audio src={assetUrls[key]} volume={sfx.volume ?? 0.35} />
+            <Sequence key={key} from={sfxStart} durationInFrames={150}>
+              <Audio src={assetUrls[key]} volume={vol} />
             </Sequence>
           );
         })

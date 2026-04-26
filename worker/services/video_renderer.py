@@ -111,9 +111,12 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
     file_size = Path(output_path).stat().st_size
     logger.info(f"[remotion] Render done: {file_size} bytes ({file_size // 1024 // 1024}MB)")
 
+    # Loudnorm pass: normalize to -14 LUFS for social media
+    final_path = await _apply_loudnorm(output_path, run_id)
+
     # Upload to Supabase Storage
     storage_path = f"renders/{run_id}.mp4"
-    with open(output_path, "rb") as f:
+    with open(final_path, "rb") as f:
         supabase.storage.from_(STORAGE_BUCKET).upload(
             storage_path, f.read(),
             file_options={"content-type": "video/mp4", "upsert": "true"},
@@ -121,7 +124,43 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
 
     # Cleanup temp files
     Path(output_path).unlink(missing_ok=True)
+    Path(final_path).unlink(missing_ok=True)
     Path(props_path).unlink(missing_ok=True)
 
     logger.info(f"[remotion] Uploaded to {storage_path}")
     return storage_path
+
+
+async def _apply_loudnorm(input_path: str, run_id: str) -> str:
+    """Normalize audio to -14 LUFS, -1 dBTP. Falls back to original on failure."""
+    output_path = f"/tmp/loudnorm_{run_id}.mp4"
+
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-af", "loudnorm=I=-14:TP=-1:LRA=11:print_format=summary",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        output_path,
+    ]
+
+    logger.info("[loudnorm] Applying -14 LUFS normalization...")
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        logger.warning(f"[loudnorm] Failed, using original: {stderr.decode()[-300:]}")
+        return input_path
+
+    # Log summary
+    for line in stderr.decode().split("\n"):
+        if any(k in line for k in ["Input Integrated", "Output Integrated", "True Peak"]):
+            logger.info(f"[loudnorm] {line.strip()}")
+
+    if not Path(output_path).exists():
+        logger.warning("[loudnorm] Output missing, fallback")
+        return input_path
+
+    logger.info(f"[loudnorm] Done: {Path(output_path).stat().st_size} bytes")
+    return output_path
