@@ -75,8 +75,8 @@ async def render_poll_loop():
                 .select("id")
                 .eq("status", "plan_approved")
                 .eq("assets_status", "ready")
-                .order("created_at", desc=False)
-                .limit(5)
+                .order("created_at", desc=True)
+                .limit(20)
                 .execute()
             )
 
