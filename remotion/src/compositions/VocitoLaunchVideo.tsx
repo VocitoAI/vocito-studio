@@ -53,16 +53,10 @@ export const VocitoLaunchVideo: React.FC<Props> = ({ scenePlan, assetUrls }) => 
         <Audio src={assetUrls.music_main} volume={(f) => calculateMusicVolume(f)} />
       )}
 
-      {/* VO — per-scene chunks for frame-perfect sync */}
-      {scenePlan.scenes.map((scene: any) => {
-        const voKey = `vo_${scene.id}`;
-        if (!assetUrls[voKey]) return null;
-        return (
-          <Sequence key={voKey} from={scene.frameStart} durationInFrames={scene.frameEnd - scene.frameStart}>
-            <Audio src={assetUrls[voKey]} volume={(f) => calculateVoVolume(f + scene.frameStart)} />
-          </Sequence>
-        );
-      })}
+      {/* VO — single concatenated file with scene-aligned silence gaps */}
+      {assetUrls.vo_main && (
+        <Audio src={assetUrls.vo_main} volume={(f) => calculateVoVolume(f)} />
+      )}
 
       {/* SFX — globally reduced + ducked during VO */}
       {scenePlan.scenes.map((scene: any) =>
