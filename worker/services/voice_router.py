@@ -88,8 +88,27 @@ async def _generate_fish_audio(text: str, voice_id: str, speed: float) -> bytes:
         return response.content
 
 
+EMOTION_VOICE_SETTINGS = {
+    "thoughtful": {"stability": 0.55, "similarity_boost": 0.75, "style": 0.30},
+    "firm":       {"stability": 0.65, "similarity_boost": 0.80, "style": 0.50},
+    "warm":       {"stability": 0.45, "similarity_boost": 0.85, "style": 0.40},
+    "reassuring": {"stability": 0.55, "similarity_boost": 0.85, "style": 0.35},
+    "declarative":{"stability": 0.70, "similarity_boost": 0.80, "style": 0.60},
+    "soft":       {"stability": 0.40, "similarity_boost": 0.85, "style": 0.20},
+    "urgent":     {"stability": 0.50, "similarity_boost": 0.75, "style": 0.55},
+    "bold":       {"stability": 0.65, "similarity_boost": 0.80, "style": 0.65},
+    "playful":    {"stability": 0.40, "similarity_boost": 0.75, "style": 0.50},
+}
+DEFAULT_VOICE_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.4}
+
+
 async def _generate_elevenlabs(text: str, voice_id: str, language: str) -> bytes:
     cleaned_text = _strip_emotion_tags(text)
+
+    # Detect dominant emotion from tags in original text
+    emotion = _detect_dominant_emotion(text)
+    settings = EMOTION_VOICE_SETTINGS.get(emotion, DEFAULT_VOICE_SETTINGS)
+    logger.info(f"[vo] ElevenLabs emotion: {emotion} -> {settings}")
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
@@ -102,9 +121,7 @@ async def _generate_elevenlabs(text: str, voice_id: str, language: str) -> bytes
                 "text": cleaned_text,
                 "model_id": "eleven_multilingual_v2",
                 "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.75,
-                    "style": 0.4,
+                    **settings,
                     "use_speaker_boost": True,
                 },
             },
@@ -117,6 +134,16 @@ def _strip_emotion_tags(text: str) -> str:
     cleaned = re.sub(r"\[[^\]]+\]", "", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+def _detect_dominant_emotion(text: str) -> str:
+    """Find most common emotion tag in the text."""
+    emotions = re.findall(r"\[(thoughtful|firm|warm|reassuring|declarative|soft|urgent|bold|playful)\]", text)
+    if not emotions:
+        return "thoughtful"
+    # Return most frequent
+    from collections import Counter
+    return Counter(emotions).most_common(1)[0][0]
 
 
 def hash_vo_request(text: str, language: str, voice_id: str, speed: float) -> str:

@@ -137,6 +137,37 @@ VO: speed 0.88, estimated 30s.
 
 Use this reference for: level of specificity, emotional arc, brand voice, and restraint.
 
+# FULLSCRIPT MUST CONTAIN FISH AUDIO INLINE TAGS
+
+The audio.voiceover.fullScript field MUST include pause and emotion tags. Fish Audio S2-Pro parses these natively for dramatic pacing and emotional variation.
+
+Pause tags (mandatory between scenes and at hero moments):
+- [pause] — 0.3 sec pause, between sentences within one scene
+- [long pause] — 0.8 sec pause, between scenes with meaning-shift (pain→solution, promise→tagline)
+- [break] — natural breath, after long sentences
+
+Emotion tags (mandatory at start of each scene's VO text):
+- [thoughtful] for reflective/contemplative moments
+- [firm] for confident statements
+- [warm] for empathetic/human moments
+- [reassuring] for promise scenes
+- [declarative] for hero moments and taglines
+- [soft] for closing/wordmark
+- [urgent] for pain points
+- [bold] for product name reveal
+
+USE scene.audio.voEmotion as source — that emotion MUST appear as inline tag at the start of that scene's text portion in fullScript.
+
+Example fullScript with correct tags:
+"[thoughtful] Every missed call is a customer walking away. [long pause] [firm] You can't always pick up. [pause] But your customers shouldn't have to wait. [long pause] [declarative] Answers. [pause] Every time. [long pause] [warm] Your customers always get through. [break] [reassuring] You stay focused on the work that matters. [long pause] [bold] Never missed. [pause] Never rushed. [long pause] [soft] Vocito. [pause] Always answering."
+
+RULES:
+- Every scene's VO starts with its emotion tag
+- [long pause] between scenes with meaning transitions
+- [pause] between sentences within a scene
+- [break] only for breath after long sentences
+- Don't over-tag: minimum needed for dramatic impact
+
 # REVIEW FEEDBACK INTEGRATION
 
 If the user message includes previous feedback on a rejected plan, READ IT CAREFULLY and address EACH point. Don't regenerate the same mistakes. The feedback is the user's creative direction — treat it as brand guidelines.
