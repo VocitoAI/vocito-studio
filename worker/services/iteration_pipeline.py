@@ -48,8 +48,8 @@ async def create_iteration(supabase: Client, parent_run_id: str):
         run_id = new_run["id"]
         logger.info(f"[iteration] Created run {run_id}")
 
-        # Mark parent superseded
-        supabase.table("studio_video_runs").update({"review_decision": "superseded"}).eq("id", parent_run_id).execute()
+        # Mark parent as rejected (superseded by this iteration)
+        supabase.table("studio_video_runs").update({"review_decision": "rejected"}).eq("id", parent_run_id).execute()
 
         def step(msg: str, pct: int, **extra):
             supabase.table("studio_video_runs").update({"current_step": msg, "progress_percent": pct, **extra}).eq("id", run_id).execute()
