@@ -154,7 +154,15 @@ async def start_iteration(body: dict):
         return JSONResponse({"error": "parentRunId required"}, status_code=400)
 
     logger.info(f"[iteration] Iteration requested for parent {parent_run_id}")
-    asyncio.create_task(create_iteration(supabase, parent_run_id))
+
+    async def _safe_iterate():
+        try:
+            await create_iteration(supabase, parent_run_id)
+        except Exception as e:
+            import traceback
+            logger.error(f"[iteration] CRASHED: {traceback.format_exc()}")
+
+    asyncio.create_task(_safe_iterate())
 
     return JSONResponse({"message": "Iteration started", "parentRunId": parent_run_id})
 
