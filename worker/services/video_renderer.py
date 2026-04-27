@@ -87,7 +87,7 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
     )
 
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)  # 10 min
     except asyncio.TimeoutError:
         process.kill()
         await process.wait()
