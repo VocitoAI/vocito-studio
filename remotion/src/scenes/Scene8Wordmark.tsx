@@ -7,6 +7,6 @@ export const Scene8Wordmark: React.FC<{ scene: any; brand: any }> = ({ scene, br
     {scene.visual.blob && (
       <Blob {...scene.visual.blob} accentColor={brand.accentColor} successColor={brand.successColor} />
     )}
-    <SceneCopy copy={scene.visual.copy} />
+    <SceneCopy copy={scene.visual.copy} sceneDurationFrames={scene.frameEnd - scene.frameStart} />
   </AbsoluteFill>
 );

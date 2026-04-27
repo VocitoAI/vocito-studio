@@ -16,7 +16,7 @@ export const Scene4Action: React.FC<{ scene: any; brand: any }> = ({ scene, bran
         mixBlendMode: "screen",
         pointerEvents: "none",
       }} />
-      <SceneCopy copy={scene.visual.copy} />
+      <SceneCopy copy={scene.visual.copy} sceneDurationFrames={scene.frameEnd - scene.frameStart} />
     </AbsoluteFill>
   );
 };
