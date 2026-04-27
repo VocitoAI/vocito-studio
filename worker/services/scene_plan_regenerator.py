@@ -1,15 +1,16 @@
 """
 Calls Claude to selectively modify scene plan based on feedback categories.
+Uses anthropic SDK (already installed via requirements).
 """
 import os
 import json
 import logging
 
-import httpx
+from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
 SYSTEM_PROMPT = """You are a precision video plan editor for Vocito Studio.
 
@@ -51,25 +52,14 @@ Return the complete adjusted scene plan as JSON."""
 
     logger.info(f"[regen] Calling Claude for categories: {categories}")
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-5",
-                "max_tokens": 8000,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": user_msg}],
-            },
-        )
-        resp.raise_for_status()
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=8000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_msg}],
+    )
 
-    data = resp.json()
-    raw = data["content"][0]["text"].strip()
+    raw = response.content[0].text.strip()
 
     # Strip markdown fences
     if raw.startswith("```"):
