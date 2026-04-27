@@ -6,11 +6,11 @@ import os
 import json
 import logging
 
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
 SYSTEM_PROMPT = """You are a precision video plan editor for Vocito Studio.
 
@@ -52,7 +52,7 @@ Return the complete adjusted scene plan as JSON."""
 
     logger.info(f"[regen] Calling Claude for categories: {categories}")
 
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=8000,
         system=SYSTEM_PROMPT,
