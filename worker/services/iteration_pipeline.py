@@ -1,8 +1,8 @@
 """
-Iteration pipeline: takes parent run + feedback, creates new iteration
-with selective regeneration of assets/VO/scene plan.
+Iteration pipeline: feedback → regenerate plan → re-render.
 """
 import logging
+import traceback
 from datetime import datetime, timezone
 
 from supabase import Client
@@ -16,117 +16,83 @@ logger = logging.getLogger(__name__)
 
 
 async def create_iteration(supabase: Client, parent_run_id: str):
-    """Create new iteration from parent run's feedback."""
-    logger.info(f"[iteration] Starting from parent {parent_run_id}")
-
-    # Fetch parent run
-    parent = (
-        supabase.table("studio_video_runs")
-        .select("*")
-        .eq("id", parent_run_id)
-        .single()
-        .execute()
-        .data
-    )
-
-    feedback = parent.get("review_feedback_structured")
-    if not feedback:
-        raise RuntimeError(f"No feedback on parent {parent_run_id}")
-
-    categories = feedback.get("categories", [])
-    if not categories:
-        raise RuntimeError("No categories in feedback")
-
-    prompt_id = parent["prompt_id"]
-    scope = merge_regeneration_scope(categories)
-    logger.info(f"[iteration] Categories: {categories}, scope: {scope}")
-
-    # Get current scene plan
-    prompt = (
-        supabase.table("studio_prompts")
-        .select("scene_plan")
-        .eq("id", prompt_id)
-        .single()
-        .execute()
-        .data
-    )
-    current_plan = prompt["scene_plan"]
-
-    # Create child run FIRST (so UI sees something)
-    new_run = (
-        supabase.table("studio_video_runs")
-        .insert(
-            {
-                "prompt_id": prompt_id,
-                "parent_run_id": parent_run_id,
-                "status": "generating_vo",
-                "current_step": "Regenerating scene plan...",
-                "regeneration_scope": categories,
-                "scene_plan": current_plan,  # snapshot current, will update after regen
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "progress_percent": 10,
-            }
-        )
-        .execute()
-        .data[0]
-    )
-    run_id = new_run["id"]
-    logger.info(f"[iteration] Created run {run_id}")
-
-    # Mark parent as superseded
-    supabase.table("studio_video_runs").update(
-        {"review_decision": "superseded"}
-    ).eq("id", parent_run_id).execute()
-
-    def update(run_id: str, **fields):
-        supabase.table("studio_video_runs").update(fields).eq("id", run_id).execute()
-
+    """Full iteration: regen plan → regen assets/VO → re-render."""
+    run_id = None
     try:
-        # Regenerate scene plan via Claude
-        update(run_id, current_step="Calling Claude to modify plan...", progress_percent=15)
-        new_plan = await regenerate_scene_plan(current_plan, feedback)
-        logger.info(f"[iteration] Scene plan regenerated, updating prompt...")
+        logger.info(f"[iteration] Starting from parent {parent_run_id}")
 
-        # Update prompt + run with new plan
+        parent = supabase.table("studio_video_runs").select("*").eq("id", parent_run_id).single().execute().data
+        feedback = parent.get("review_feedback_structured")
+        if not feedback or not feedback.get("categories"):
+            logger.error(f"[iteration] No feedback/categories on {parent_run_id}")
+            return
+
+        prompt_id = parent["prompt_id"]
+        categories = feedback["categories"]
+        scope = merge_regeneration_scope(categories)
+        logger.info(f"[iteration] Categories: {categories}")
+
+        current_plan = supabase.table("studio_prompts").select("scene_plan").eq("id", prompt_id).single().execute().data["scene_plan"]
+
+        # Create child run
+        new_run = supabase.table("studio_video_runs").insert({
+            "prompt_id": prompt_id,
+            "parent_run_id": parent_run_id,
+            "status": "generating_vo",
+            "current_step": "Regenerating scene plan via Claude...",
+            "regeneration_scope": categories,
+            "scene_plan": current_plan,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "progress_percent": 10,
+        }).execute().data[0]
+        run_id = new_run["id"]
+        logger.info(f"[iteration] Created run {run_id}")
+
+        # Mark parent superseded
+        supabase.table("studio_video_runs").update({"review_decision": "superseded"}).eq("id", parent_run_id).execute()
+
+        def step(msg: str, pct: int, **extra):
+            supabase.table("studio_video_runs").update({"current_step": msg, "progress_percent": pct, **extra}).eq("id", run_id).execute()
+            logger.info(f"[iteration] {msg}")
+
+        # Regen scene plan
+        new_plan = await regenerate_scene_plan(current_plan, feedback)
         supabase.table("studio_prompts").update({"scene_plan": new_plan}).eq("id", prompt_id).execute()
-        update(run_id, scene_plan=new_plan, current_step="Plan updated. Processing assets...", progress_percent=25)
-        # Selective asset regeneration
+        step("Plan regenerated. Processing...", 30, scene_plan=new_plan)
+
+        # Selective asset regen
         if scope["regenerate_music"] or scope["regenerate_sfx"]:
-            update(run_id, current_step="Re-resolving audio assets...", progress_percent=20)
-            supabase.table("studio_prompts").update({"assets_status": None}).eq(
-                "id", prompt_id
-            ).execute()
-            resolver = AssetResolver(supabase)
-            await resolver.resolve(prompt_id)
+            step("Re-resolving audio assets...", 35)
+            supabase.table("studio_prompts").update({"assets_status": None}).eq("id", prompt_id).execute()
+            await AssetResolver(supabase).resolve(prompt_id)
 
         if scope["regenerate_vo"]:
-            update(run_id, current_step="Regenerating voice-over...", progress_percent=40)
-            # Delete old VO link so a new one is generated
-            supabase.table("studio_prompt_assets").delete().eq(
-                "prompt_id", prompt_id
-            ).eq("usage_context", "vo_main").execute()
+            step("Regenerating voice-over...", 45)
+            supabase.table("studio_prompt_assets").delete().eq("prompt_id", prompt_id).eq("usage_context", "vo_main").execute()
             await generate_plan_vo(supabase, prompt_id)
 
         # Render
-        update(run_id, status="rendering", current_step="Rendering video...", progress_percent=60)
+        step("Rendering video...", 60, status="rendering")
         storage_path = await render_video(supabase, prompt_id, run_id)
 
-        update(
-            run_id,
-            status="completed",
-            current_step="Iteration complete.",
-            progress_percent=100,
-            output_url=storage_path,
-            completed_at=datetime.now(timezone.utc).isoformat(),
-        )
-        logger.info(f"[iteration] Completed {run_id}")
+        supabase.table("studio_video_runs").update({
+            "status": "completed",
+            "current_step": "Iteration complete.",
+            "progress_percent": 100,
+            "output_url": storage_path,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", run_id).execute()
+        logger.info(f"[iteration] DONE {run_id}")
 
     except Exception as e:
-        import traceback
-        logger.error(f"[iteration] Failed: {traceback.format_exc()}")
-        update(
-            run_id,
-            status="failed",
-            current_step="Iteration failed",
-            error_message=f"{type(e).__name__}: {str(e)}"[:1000],
-        )
+        tb = traceback.format_exc()
+        logger.error(f"[iteration] FAILED: {tb}")
+        if run_id:
+            try:
+                supabase.table("studio_video_runs").update({
+                    "status": "failed",
+                    "current_step": "Iteration failed",
+                    "error_message": f"{type(e).__name__}: {str(e)}\n{tb[-500:]}"[:1000],
+                }).eq("id", run_id).execute()
+            except Exception:
+                pass
