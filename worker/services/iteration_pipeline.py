@@ -52,15 +52,7 @@ async def create_iteration(supabase: Client, parent_run_id: str):
     )
     current_plan = prompt["scene_plan"]
 
-    # Regenerate scene plan via Claude
-    new_plan = await regenerate_scene_plan(current_plan, feedback)
-
-    # Update prompt with new plan
-    supabase.table("studio_prompts").update({"scene_plan": new_plan}).eq(
-        "id", prompt_id
-    ).execute()
-
-    # Create new video_run as child
+    # Create child run FIRST (so UI sees something)
     new_run = (
         supabase.table("studio_video_runs")
         .insert(
@@ -68,9 +60,9 @@ async def create_iteration(supabase: Client, parent_run_id: str):
                 "prompt_id": prompt_id,
                 "parent_run_id": parent_run_id,
                 "status": "generating_vo",
-                "current_step": "Iteration started — regenerating...",
+                "current_step": "Regenerating scene plan...",
                 "regeneration_scope": categories,
-                "scene_plan": new_plan,
+                "scene_plan": current_plan,  # snapshot current, will update after regen
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "progress_percent": 10,
             }
@@ -79,7 +71,7 @@ async def create_iteration(supabase: Client, parent_run_id: str):
         .data[0]
     )
     run_id = new_run["id"]
-    logger.info(f"[iteration] Created run {run_id} ({new_run.get('iteration_label', '?')})")
+    logger.info(f"[iteration] Created run {run_id}")
 
     # Mark parent as superseded
     supabase.table("studio_video_runs").update(
@@ -90,6 +82,14 @@ async def create_iteration(supabase: Client, parent_run_id: str):
         supabase.table("studio_video_runs").update(fields).eq("id", run_id).execute()
 
     try:
+        # Regenerate scene plan via Claude
+        update(run_id, current_step="Calling Claude to modify plan...", progress_percent=15)
+        new_plan = await regenerate_scene_plan(current_plan, feedback)
+        logger.info(f"[iteration] Scene plan regenerated, updating prompt...")
+
+        # Update prompt + run with new plan
+        supabase.table("studio_prompts").update({"scene_plan": new_plan}).eq("id", prompt_id).execute()
+        update(run_id, scene_plan=new_plan, current_step="Plan updated. Processing assets...", progress_percent=25)
         # Selective asset regeneration
         if scope["regenerate_music"] or scope["regenerate_sfx"]:
             update(run_id, current_step="Re-resolving audio assets...", progress_percent=20)
