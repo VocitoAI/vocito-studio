@@ -1,16 +1,18 @@
 """
-Calls Claude to selectively modify scene plan based on feedback categories.
-Uses anthropic SDK (already installed via requirements).
+Calls Claude to selectively modify scene plan based on feedback.
+Runs in a thread to avoid blocking the asyncio event loop.
 """
 import os
 import json
 import logging
+import asyncio
+from functools import partial
 
-from anthropic import AsyncAnthropic
+import httpx
 
 logger = logging.getLogger(__name__)
 
-client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 SYSTEM_PROMPT = """You are a precision video plan editor for Vocito Studio.
 
@@ -32,6 +34,27 @@ CRITICAL RULES:
 Return the COMPLETE adjusted scene plan as valid JSON. No markdown wrapping."""
 
 
+def _call_claude_sync(user_msg: str) -> str:
+    """Synchronous HTTP call to Claude API — runs in thread pool."""
+    resp = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 8000,
+            "system": SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_msg}],
+        },
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    return resp.json()["content"][0]["text"].strip()
+
+
 async def regenerate_scene_plan(current_plan: dict, feedback: dict) -> dict:
     categories = feedback.get("categories", [])
     global_fb = feedback.get("global_feedback", "")
@@ -50,16 +73,13 @@ PER-SCENE FEEDBACK:
 
 Return the complete adjusted scene plan as JSON."""
 
-    logger.info(f"[regen] Calling Claude for categories: {categories}")
+    logger.info(f"[regen] Calling Claude (threaded) for categories: {categories}")
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=8000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    )
+    # Run sync HTTP call in thread pool to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(None, partial(_call_claude_sync, user_msg))
 
-    raw = response.content[0].text.strip()
+    logger.info(f"[regen] Claude responded ({len(raw)} chars)")
 
     # Strip markdown fences
     if raw.startswith("```"):
@@ -73,7 +93,7 @@ Return the complete adjusted scene plan as JSON."""
     # Validate frame timings unchanged
     for old_s, new_s in zip(current_plan["scenes"], new_plan["scenes"]):
         if old_s["frameStart"] != new_s["frameStart"] or old_s["frameEnd"] != new_s["frameEnd"]:
-            raise RuntimeError(f"Frame timing changed for {old_s['id']} — rejected")
+            raise RuntimeError(f"Frame timing changed for {old_s['id']}")
 
     logger.info("[regen] Scene plan regenerated successfully")
     return new_plan
