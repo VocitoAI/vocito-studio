@@ -34,10 +34,18 @@ async def create_iteration(supabase: Client, parent_run_id: str):
 
         current_plan = supabase.table("studio_prompts").select("scene_plan").eq("id", prompt_id).single().execute().data["scene_plan"]
 
+        # Calculate next iteration number
+        existing = supabase.table("studio_video_runs").select("iteration_number").eq(
+            "prompt_id", prompt_id
+        ).order("iteration_number", desc=True).limit(1).execute()
+        next_iter = (existing.data[0]["iteration_number"] + 1) if existing.data else 1
+
         # Create child run
         new_run = supabase.table("studio_video_runs").insert({
             "prompt_id": prompt_id,
             "parent_run_id": parent_run_id,
+            "iteration_number": next_iter,
+            "iteration_label": f"V{next_iter}",
             "status": "generating_vo",
             "current_step": "Regenerating scene plan via Claude...",
             "regeneration_scope": categories,

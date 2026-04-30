@@ -13,9 +13,15 @@ export function calculateMusicVolume(frame: number): number {
   const ducked = AUDIO_MIX.music.duckedDuringVO;
   const fade = MUSIC_DUCK_FADE_FRAMES;
 
-  // Scene 1 atmospheric fade-in (0-60)
-  if (frame < 60) {
-    return interpolate(frame, [0, 60], [0.15, base], {
+  // Scene 1: true silence first 1 sec, then atmospheric build
+  if (frame < 30) {
+    return interpolate(frame, [0, 30], [0.0, 0.02], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+  }
+  if (frame < 90) {
+    return interpolate(frame, [30, 90], [0.02, base], {
       easing: Easing.bezier(0.16, 1, 0.3, 1),
       extrapolateRight: "clamp",
     });
@@ -29,11 +35,8 @@ export function calculateMusicVolume(frame: number): number {
     });
   }
 
-  // All VO ranges including scene 8 partial
-  const allRanges: [number, number][] = [
-    ...VO_ACTIVE_FRAME_RANGES,
-    [870, SCENE_8_VO_END],
-  ];
+  // All VO ranges (scene 8 now included in VO_ACTIVE_FRAME_RANGES)
+  const allRanges = VO_ACTIVE_FRAME_RANGES;
 
   // Check if in a VO range
   const activeRange = allRanges.find(([s, e]) => frame >= s && frame < e);

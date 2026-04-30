@@ -2,7 +2,11 @@ import { AbsoluteFill, useCurrentFrame, interpolate, spring, useVideoConfig, Eas
 import { SATOSHI_FAMILY } from "../fonts";
 import { FRAUNCES_FAMILY } from "../fonts/fraunces";
 
-type Props = { copy: any; sceneDurationFrames?: number };
+type Props = {
+  copy: any;
+  sceneDurationFrames?: number;
+  sceneId?: string;
+};
 
 const FONT: Record<string, string> = {
   serif_italic: `'${FRAUNCES_FAMILY}', Georgia, serif`,
@@ -10,7 +14,7 @@ const FONT: Record<string, string> = {
   mono_label: "monospace",
 };
 const SIZE: Record<string, number> = { sm: 36, md: 56, lg: 88, xl: 132 };
-const WEIGHT: Record<string, number> = { serif_italic: 500, sans_display: 700, mono_label: 500 };
+const WEIGHT: Record<string, number> = { serif_italic: 500, sans_display: 900, mono_label: 500 };
 const SPACING: Record<string, string> = { serif_italic: "-0.02em", sans_display: "-0.04em", mono_label: "0.02em" };
 const POS: Record<string, React.CSSProperties> = {
   center: { alignItems: "center", justifyContent: "center" },
@@ -18,7 +22,7 @@ const POS: Record<string, React.CSSProperties> = {
   bottom: { alignItems: "flex-end", justifyContent: "center", paddingBottom: 220 },
 };
 
-export const SceneCopy: React.FC<Props> = ({ copy, sceneDurationFrames }) => {
+export const SceneCopy: React.FC<Props> = ({ copy, sceneDurationFrames, sceneId }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (!copy) return null;
@@ -74,8 +78,47 @@ export const SceneCopy: React.FC<Props> = ({ copy, sceneDurationFrames }) => {
     );
   }
 
+  // Kinetic letters: letter-by-letter reveal for hero moments
+  if (copy.animation === "kinetic_letters") {
+    const letters = copy.text.split("");
+    const totalRevealFrames = dur;
+    const framesPerLetter = totalRevealFrames / letters.length;
+
+    return (
+      <AbsoluteFill style={{ display: "flex", padding: 140, ...(POS[copy.position] || POS.center) }}>
+        <div style={{ ...baseStyle }}>
+          {letters.map((letter: string, idx: number) => {
+            const letterStart = idx * framesPerLetter;
+            const letterOpacity = interpolate(
+              frame, [letterStart, letterStart + 8], [0, 1],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1) }
+            );
+            const letterY = interpolate(
+              frame, [letterStart, letterStart + 12], [20, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1) }
+            );
+
+            return (
+              <span
+                key={idx}
+                style={{
+                  display: "inline-block",
+                  opacity: letterOpacity,
+                  transform: `translateY(${letterY}px)`,
+                  whiteSpace: letter === " " ? "pre" : "normal",
+                }}
+              >
+                {letter}
+              </span>
+            );
+          })}
+        </div>
+      </AbsoluteFill>
+    );
+  }
+
   // Standard animations
-  let opacity = 1, y = 0, sc = 1;
+  let opacity = 1, y = 0;
 
   if (copy.animation === "fade_up") {
     opacity = interpolate(frame, [0, dur], [0, 1], { extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1) });
@@ -84,12 +127,19 @@ export const SceneCopy: React.FC<Props> = ({ copy, sceneDurationFrames }) => {
     opacity = interpolate(frame, [0, dur], [0, 1], { extrapolateRight: "clamp", easing: Easing.bezier(0.4, 0, 0.2, 1) });
   }
 
+  // Scene 8 wordmark: letterspacing tightens from 0.05em to -0.02em
+  const isWordmark = sceneId === "scene8_wordmark";
+  const dynamicLetterSpacing = isWordmark
+    ? `${interpolate(frame, [0, 60], [0.05, -0.02], { extrapolateRight: "clamp", easing: Easing.bezier(0.16, 1, 0.3, 1) })}em`
+    : baseStyle.letterSpacing;
+
   return (
     <AbsoluteFill style={{ display: "flex", padding: 140, ...(POS[copy.position] || POS.center) }}>
       <div style={{
         ...baseStyle,
+        letterSpacing: dynamicLetterSpacing,
         opacity,
-        transform: `translateY(${y}px) scale(${sc})`,
+        transform: `translateY(${y}px)`,
       }}>
         {copy.text}
       </div>

@@ -4,17 +4,17 @@
  */
 export const AUDIO_MIX = {
   music: {
-    base: 0.45,           // -7 dB — full in non-VO sections
-    duckedDuringVO: 0.10, // -20 dB — heavy duck during VO
-    fadeOut: 0.05,
+    base: 0.30,           // was 0.45 — softer bed, less limiter pressure
+    duckedDuringVO: 0.08, // was 0.10 — deeper duck for VO clarity
+    fadeOut: 0.03,         // was 0.05
   },
   vo: {
     main: 1.0,
-    boost: 1.15,  // +1.2 dB for scene 4 hero
+    boost: 1.20,  // was 1.15 — stronger scene 4 hero lift
   },
   sfx: {
-    globalMultiplier: 0.35,
-    duringVO: 0.20,
+    globalMultiplier: 0.30, // was 0.35
+    duringVO: 0.15,         // was 0.20
   },
 };
 
@@ -26,7 +26,8 @@ export const VO_ACTIVE_FRAME_RANGES: [number, number][] = [
   [450, 570],  // Scene 5
   [570, 690],  // Scene 6
   [690, 870],  // Scene 7
+  [870, 990],  // Scene 8
 ];
 
-export const SCENE_8_VO_END = 960;
+export const SCENE_8_VO_END = 990;
 export const MUSIC_DUCK_FADE_FRAMES = 10;

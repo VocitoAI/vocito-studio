@@ -14,6 +14,7 @@ export const loadFonts = async (): Promise<void> => {
       { file: "Satoshi-Regular.woff2", weight: "400" },
       { file: "Satoshi-Medium.woff2", weight: "500" },
       { file: "Satoshi-Bold.woff2", weight: "700" },
+      { file: "Satoshi-Black.woff2", weight: "900" },
     ];
 
     const faces = weights.map(
