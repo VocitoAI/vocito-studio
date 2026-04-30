@@ -26,7 +26,7 @@ export async function GET() {
       voice_id: v._id,
       name: v.title || "Untitled",
       description: v.description || "",
-      preview_url: v.samples?.[0]?.url || null,
+      preview_url: v.samples?.[0]?.audio || v.samples?.[0]?.url || null,
       cover_url: v.cover_image || null,
       languages: v.languages || [],
       tags: v.tags || [],
