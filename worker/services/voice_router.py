@@ -2,11 +2,14 @@
 VoiceRouter: chooses VO provider based on language.
 - EN → Fish Audio (better emotion control via inline tags)
 - NL/DE → ElevenLabs v2 multilingual
+- Favorites override: if user has liked voices for a language,
+  those are used instead of the defaults.
 """
 import os
 import re
 import hashlib
 import logging
+import random
 from typing import Optional
 
 import httpx
@@ -28,9 +31,45 @@ VOICE_IDS = {
 }
 
 
-def select_provider(language: str) -> tuple[str, str]:
-    # EN → Fish Audio (better emotion tag support)
-    # NL/DE → ElevenLabs (multilingual)
+def _get_favorite_voice(supabase, language: str) -> Optional[tuple[str, str]]:
+    """Check studio_voice_favorites for a liked voice matching the language.
+    Returns (provider, voice_id) or None."""
+    if supabase is None:
+        return None
+    try:
+        # First try exact language match
+        result = supabase.table("studio_voice_favorites").select(
+            "provider, voice_id"
+        ).eq("language", language).execute()
+
+        if result.data:
+            pick = random.choice(result.data)
+            logger.info(f"[vo] Using favorite voice {pick['voice_id']} ({pick['provider']}) for {language}")
+            return (pick["provider"], pick["voice_id"])
+
+        # No language-specific favorite — try any favorite for the right provider
+        provider = "fish_audio" if language == "en" else "elevenlabs"
+        result = supabase.table("studio_voice_favorites").select(
+            "provider, voice_id"
+        ).eq("provider", provider).execute()
+
+        if result.data:
+            pick = random.choice(result.data)
+            logger.info(f"[vo] Using provider-matched favorite {pick['voice_id']} for {language}")
+            return (pick["provider"], pick["voice_id"])
+    except Exception as e:
+        logger.warning(f"[vo] Failed to query favorites: {e}")
+
+    return None
+
+
+def select_provider(language: str, supabase=None) -> tuple[str, str]:
+    # Check favorites first
+    fav = _get_favorite_voice(supabase, language)
+    if fav:
+        return fav
+
+    # Fallback: EN → Fish Audio, NL/DE → ElevenLabs
     if language == "en":
         return ("fish_audio", VOICE_IDS["fish_audio"]["en"])
     if language in VOICE_IDS["elevenlabs"]:

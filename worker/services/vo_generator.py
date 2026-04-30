@@ -10,13 +10,14 @@ from pathlib import Path
 
 from supabase import Client
 from services.voice_router import generate_vo, select_provider, hash_vo_request
+from templates.registry import get_scene_frames
 
 logger = logging.getLogger(__name__)
 
 STORAGE_BUCKET = "studio-assets"
 FPS = 30
 
-# Scene boundaries (frameStart, frameEnd)
+# Legacy fallback — overridden by template-based lookup in generate_plan_vo
 SCENE_FRAMES = {
     "scene1_materializes": (0, 90),
     "scene2_pain_01": (90, 180),
@@ -39,7 +40,14 @@ async def generate_plan_vo(supabase: Client, prompt_id: str) -> list[str]:
     scene_plan = plan["scene_plan"]
     speed = scene_plan["audio"]["voiceover"].get("speed", 0.88)
     language = scene_plan["meta"]["language"]
-    provider, voice_id = select_provider(language)
+    provider, voice_id = select_provider(language, supabase=supabase)
+
+    # Get scene frames from template (falls back to hardcoded for launch_v1)
+    template_id = scene_plan.get("meta", {}).get("template") or scene_plan.get("meta", {}).get("videoType", "launch_v1")
+    try:
+        scene_frames = get_scene_frames(template_id)
+    except ValueError:
+        scene_frames = SCENE_FRAMES
 
     chunk_paths = {}  # scene_id -> (local_path, asset_id)
     asset_ids = []
@@ -178,8 +186,10 @@ def _concatenate_with_silence(chunk_paths: dict, output_path: str, scene_plan: d
 
     for scene in scene_plan["scenes"]:
         scene_id = scene["id"]
-        frames = SCENE_FRAMES.get(scene_id, (0, 0))
-        scene_duration = (frames[1] - frames[0]) / FPS
+        # Read frame timings directly from the plan (template-agnostic)
+        frame_start = scene.get("frameStart", 0)
+        frame_end = scene.get("frameEnd", 0)
+        scene_duration = (frame_end - frame_start) / FPS
 
         chunk = chunk_paths.get(scene_id)
 
