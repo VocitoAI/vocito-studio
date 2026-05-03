@@ -9,6 +9,7 @@ import {
   Sparkles,
   Library,
   Mic2,
+  Heart,
   Settings,
   LogOut,
   Menu,
@@ -21,6 +22,7 @@ const navigation = [
   { name: "New Video", href: "/new", icon: Sparkles },
   { name: "Library", href: "/library", icon: Library },
   { name: "Voices", href: "/voices", icon: Mic2 },
+  { name: "Favorites", href: "/favorites", icon: Heart },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

@@ -44,7 +44,18 @@ class AssetResolver:
             failure_count = 0
 
             # 1. Resolve main music track
+            # Add template-specific music search modifier
+            template_id = scene_plan.get("meta", {}).get("template") or scene_plan.get("meta", {}).get("videoType", "launch_v1")
+            music_modifier = {
+                "launch_v1": "",
+                "marketing_niche": "hopeful warm",
+                "testimonial": "warm intimate slow",
+                "ad_short": "urgent driving energetic",
+            }.get(template_id, "")
+
             music_query = scene_plan["audio"]["music"]["searchQuery"]
+            if music_modifier:
+                music_query = f"{music_query} {music_modifier}"
             music_mood = scene_plan["audio"]["music"].get("mood")
             music_bpm_min = scene_plan["audio"]["music"].get("bpmMin")
             music_bpm_max = scene_plan["audio"]["music"].get("bpmMax")
@@ -120,16 +131,52 @@ class AssetResolver:
         bpm_min: Optional[int] = None,
         bpm_max: Optional[int] = None,
     ) -> bool:
-        """Resolve one asset: cache check → search → download → store → link."""
+        """Resolve one asset: favorites → cache → search → download → store → link."""
         query_normalized = query.strip().lower()
+
+        # Check favorites first — if a favorited track matches, prefer it
+        try:
+            fav_type = "music_track" if asset_type == "music" else "sfx"
+            fav_resp = (
+                self.supabase.table("studio_asset_favorites")
+                .select("external_id, provider, name, metadata")
+                .eq("asset_type", fav_type)
+                .order("usage_count", desc=True)
+                .limit(5)
+                .execute()
+            )
+            if fav_resp.data:
+                # Try to find a cached asset matching any favorite
+                for fav in fav_resp.data:
+                    if not fav.get("external_id"):
+                        continue
+                    fav_asset = (
+                        self.supabase.table("studio_assets")
+                        .select("id")
+                        .eq("external_id", fav["external_id"])
+                        .eq("asset_type", asset_type)
+                        .eq("download_status", "ready")
+                        .limit(1)
+                        .execute()
+                    )
+                    if fav_asset.data:
+                        logger.info(f"[resolver] FAVORITE HIT: '{fav['name']}' for {asset_type}")
+                        self._link_asset(prompt_id, fav_asset.data[0]["id"], usage_context, scene_id, frame_offset, volume)
+                        # Increment favorite usage
+                        self.supabase.table("studio_asset_favorites").update(
+                            {"usage_count": (fav.get("usage_count") or 0) + 1, "last_used_at": datetime.now(timezone.utc).isoformat()}
+                        ).eq("external_id", fav["external_id"]).eq("asset_type", fav_type).execute()
+                        return True
+        except Exception as e:
+            logger.warning(f"[resolver] Favorites check failed: {e}")
 
         # Check cache
         cache = (
             self.supabase.table("studio_assets")
-            .select("id, usage_count")
+            .select("id, used_in_runs")
             .eq("asset_type", asset_type)
             .eq("download_status", "ready")
-            .ilike("search_query", query_normalized)
+            .ilike("title", f"%{query_normalized}%")
             .limit(1)
             .execute()
         )
@@ -139,7 +186,7 @@ class AssetResolver:
             logger.info(f"[resolver] CACHE HIT for '{query}' -> {cached['id']}")
             self._link_asset(prompt_id, cached["id"], usage_context, scene_id, frame_offset, volume)
             self.supabase.table("studio_assets").update(
-                {"last_used_at": datetime.now(timezone.utc).isoformat(), "usage_count": cached["usage_count"] + 1}
+                {"last_used_at": datetime.now(timezone.utc).isoformat(), "used_in_runs": (cached.get("used_in_runs") or 0) + 1}
             ).eq("id", cached["id"]).execute()
             return True
 
@@ -185,7 +232,8 @@ class AssetResolver:
         existing = (
             self.supabase.table("studio_assets")
             .select("id")
-            .eq("es_asset_id", es_id)
+            .eq("external_id", es_id)
+            .eq("source", "epidemic_sound")
             .eq("asset_type", asset_type)
             .eq("download_status", "ready")
             .limit(1)

@@ -93,9 +93,44 @@ export async function POST(request: NextRequest) {
     const isUniversal = templateId === "universal" || !TEMPLATES[templateId];
     const effectiveTemplateId = TEMPLATES[templateId] ? templateId : "universal";
     const toolSchema = isLaunch ? launchV1JsonSchema : genericJsonSchema;
-    const systemPrompt = isLaunch
+    let systemPrompt = isLaunch
       ? SCENE_PLAN_SYSTEM_PROMPT
       : buildTemplateSystemPrompt(effectiveTemplateId);
+
+    // Fetch user preferences (asset + voice favorites) and inject into prompt
+    try {
+      const [assetFavs, voiceFavs] = await Promise.all([
+        supabase.from("studio_asset_favorites").select("asset_type, name, metadata, provider").order("usage_count", { ascending: false }).limit(20),
+        supabase.from("studio_voice_favorites").select("provider, name, voice_id, language").limit(10),
+      ]);
+
+      const prefs: string[] = [];
+
+      const musicFavs = (assetFavs.data || []).filter((f: any) => f.asset_type === "music_track");
+      if (musicFavs.length > 0) {
+        prefs.push(`## Preferred music:\n${musicFavs.map((f: any) => `- "${f.name}" (${f.provider}${f.metadata?.mood ? `, mood: ${f.metadata.mood}` : ""}${f.metadata?.bpm ? `, ${f.metadata.bpm} BPM` : ""})`).join("\n")}`);
+      }
+
+      const sfxFavs = (assetFavs.data || []).filter((f: any) => f.asset_type === "sfx");
+      if (sfxFavs.length > 0) {
+        prefs.push(`## Preferred SFX:\n${sfxFavs.map((f: any) => `- "${f.name}"`).join("\n")}`);
+      }
+
+      const styleFavs = (assetFavs.data || []).filter((f: any) => f.asset_type === "visual_style" || f.asset_type === "color_palette");
+      if (styleFavs.length > 0) {
+        prefs.push(`## Preferred visual styles:\n${styleFavs.map((f: any) => `- ${f.name}: ${JSON.stringify(f.metadata)}`).join("\n")}`);
+      }
+
+      if ((voiceFavs.data || []).length > 0) {
+        prefs.push(`## Preferred voices:\n${(voiceFavs.data || []).map((f: any) => `- ${f.name} (${f.provider}, ${f.language || "any"})`).join("\n")}`);
+      }
+
+      if (prefs.length > 0) {
+        systemPrompt += `\n\n# USER PREFERENCES (use these as defaults unless the prompt suggests otherwise)\n${prefs.join("\n\n")}`;
+      }
+    } catch (e) {
+      console.log("[/api/plan] Could not fetch preferences:", e);
+    }
 
     // Call Claude API with tool use for structured output
     const anthropic = new Anthropic({
