@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 from supabase import Client
+from templates.registry import get_template
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +60,29 @@ async def render_video(supabase: Client, prompt_id: str, run_id: str) -> str:
 
     output_path = f"/tmp/render_{run_id}.mp4"
 
+    # Detect template from scene plan
+    template_id = scene_plan.get("meta", {}).get("template") or scene_plan.get("meta", {}).get("videoType", "launch_v1")
+    template = get_template(template_id)
+    composition_id = template.remotion_composition_id
+
+    # For universal/dynamic templates, derive dimensions from scene plan
+    aspect = scene_plan.get("meta", {}).get("aspectRatio", "16:9")
+    if aspect in ("9:16", "1080x1920"):
+        width, height = 1080, 1920
+    else:
+        width, height = template.width, template.height
+
     # Run Remotion CLI
     # Chromium sandbox disabled via env var (set in Dockerfile)
     cmd = [
         "npx", "remotion", "render",
         "src/Root.tsx",
-        "VocitoLaunchVideo",
+        composition_id,
         output_path,
         f"--props={props_path}",
         "--codec=h264", "--crf=18",
+        f"--width={width}",
+        f"--height={height}",
         "--concurrency=1",
         "--gl=angle-egl",
         "--log=verbose",
@@ -137,7 +152,7 @@ async def _apply_loudnorm(input_path: str, run_id: str) -> str:
 
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
-        "-af", "loudnorm=I=-14:TP=-1:LRA=11:print_format=summary",
+        "-af", "loudnorm=I=-16:TP=-2:LRA=14:print_format=summary",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
         output_path,
     ]

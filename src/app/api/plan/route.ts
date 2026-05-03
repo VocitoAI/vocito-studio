@@ -5,19 +5,15 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import {
   SCENE_PLAN_SYSTEM_PROMPT,
   buildUserMessage,
+  buildTemplateSystemPrompt,
 } from "@/lib/ai/systemPrompt";
-import { ScenePlanSchema } from "@/types/scenePlan";
+import { ScenePlanSchema, LaunchV1ScenePlanSchema } from "@/types/scenePlan";
+import { TEMPLATES } from "@/lib/templates/registry";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// Convert Zod v4 schema to JSON Schema, then clean for Anthropic compatibility
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rawJsonSchema = z.toJSONSchema(ScenePlanSchema) as any;
-const { $schema: _, ...rawClean } = rawJsonSchema;
-
 // Anthropic tool use doesn't support "const" or "additionalProperties"
-// Convert const → enum[value], strip additionalProperties
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function cleanSchemaForAnthropic(obj: any): any {
   if (typeof obj !== "object" || obj === null) return obj;
@@ -35,14 +31,23 @@ function cleanSchemaForAnthropic(obj: any): any {
   return result;
 }
 
-const scenePlanJsonSchema = cleanSchemaForAnthropic(rawClean);
+// Pre-compute launch_v1 schema (most common)
+const launchV1JsonSchema = cleanSchemaForAnthropic(
+  (() => { const { $schema: _, ...rest } = z.toJSONSchema(LaunchV1ScenePlanSchema) as any; return rest; })()
+);
+
+// Generic schema for non-launch templates
+const genericJsonSchema = cleanSchemaForAnthropic(
+  (() => { const { $schema: _, ...rest } = z.toJSONSchema(ScenePlanSchema) as any; return rest; })()
+);
 
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabase();
   let promptId: string | null = null;
 
   try {
-    const { rawPrompt, language } = await request.json();
+    const body = await request.json();
+    const { rawPrompt, language, template: templateId = "launch_v1", extraFields = {} } = body;
 
     if (!rawPrompt || typeof rawPrompt !== "string" || rawPrompt.length < 10) {
       return NextResponse.json(
@@ -56,6 +61,11 @@ export async function POST(request: NextRequest) {
         { error: "Language must be en, nl, or de" },
         { status: 400 }
       );
+    }
+
+    if (!TEMPLATES[templateId]) {
+      // Unknown templates fall back to universal instead of erroring
+      console.log(`[/api/plan] Unknown template "${templateId}", falling back to universal`);
     }
 
     // Create prompt record
@@ -78,6 +88,15 @@ export async function POST(request: NextRequest) {
 
     promptId = promptRecord.id;
 
+    // Select schema and system prompt based on template
+    const isLaunch = templateId === "launch_v1";
+    const isUniversal = templateId === "universal" || !TEMPLATES[templateId];
+    const effectiveTemplateId = TEMPLATES[templateId] ? templateId : "universal";
+    const toolSchema = isLaunch ? launchV1JsonSchema : genericJsonSchema;
+    const systemPrompt = isLaunch
+      ? SCENE_PLAN_SYSTEM_PROMPT
+      : buildTemplateSystemPrompt(effectiveTemplateId);
+
     // Call Claude API with tool use for structured output
     const anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -86,20 +105,20 @@ export async function POST(request: NextRequest) {
     const response = await anthropic.messages.create({
       model: "claude-opus-4-7",
       max_tokens: 8000,
-      system: SCENE_PLAN_SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: [
         {
           name: "generate_scene_plan",
           description:
-            "Generate a complete ScenePlan for a Vocito launch video. Every field in the schema is REQUIRED unless marked optional. Enums must be used EXACTLY as specified. uiElements must be objects with type/content/animationIn/showFromFrame/showUntilFrame.",
-          input_schema: scenePlanJsonSchema as Anthropic.Tool.InputSchema,
+            `Generate a complete ScenePlan for a Vocito ${TEMPLATES[effectiveTemplateId]?.name || "video"}. Every field in the schema is REQUIRED unless marked optional. Enums must be used EXACTLY as specified.`,
+          input_schema: toolSchema as Anthropic.Tool.InputSchema,
         },
       ],
       tool_choice: { type: "tool", name: "generate_scene_plan" },
       messages: [
         {
           role: "user",
-          content: buildUserMessage({ rawPrompt, language }),
+          content: buildUserMessage({ rawPrompt, language, template: effectiveTemplateId, extraFields }),
         },
       ],
     });
@@ -108,10 +127,7 @@ export async function POST(request: NextRequest) {
     const toolUseBlock = response.content.find((b) => b.type === "tool_use");
     if (!toolUseBlock || toolUseBlock.type !== "tool_use") {
       const rawContent = JSON.stringify(response.content).slice(0, 500);
-      console.error(
-        "[/api/plan] Claude did not use tool. Response:",
-        rawContent
-      );
+      console.error("[/api/plan] Claude did not use tool. Response:", rawContent);
 
       await supabase
         .from("studio_prompts")
@@ -122,19 +138,13 @@ export async function POST(request: NextRequest) {
         .eq("id", promptId);
 
       return NextResponse.json(
-        {
-          error: "Claude did not use the generate_scene_plan tool",
-          promptId,
-        },
+        { error: "Claude did not use the generate_scene_plan tool", promptId },
         { status: 500 }
       );
     }
 
     console.log("[/api/plan] Stop reason:", response.stop_reason);
     console.log("[/api/plan] Usage:", JSON.stringify(response.usage));
-    console.log("[/api/plan] Tool use block name:", toolUseBlock.name);
-    console.log("[/api/plan] Tool input keys:", Object.keys(toolUseBlock.input || {}));
-    console.log("[/api/plan] Full input (first 1000 chars):", JSON.stringify(toolUseBlock.input).slice(0, 1000));
 
     let scenePlanJson = toolUseBlock.input as Record<string, unknown>;
 
@@ -150,41 +160,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate with Zod (belt-and-suspenders — tool use should match schema)
-    const parsed = ScenePlanSchema.safeParse(scenePlanJson);
+    // Validate with Zod — universal uses generic schema for maximum flexibility
+    const schema = isLaunch ? LaunchV1ScenePlanSchema : ScenePlanSchema;
+    const parsed = schema.safeParse(scenePlanJson);
     if (!parsed.success) {
       const issues = parsed.error.issues;
-      const issuesJson = JSON.stringify(issues, null, 2);
-
-      console.error("[/api/plan] Zod validation failed despite tool use:");
-      console.error(issuesJson);
-
-      const inputPreview = JSON.stringify(scenePlanJson).slice(0, 2000);
-      const notesContent = `Tool use validation failed.\n\nStop reason: ${response.stop_reason}\nUsage: ${JSON.stringify(response.usage)}\nTool name: ${toolUseBlock.name}\nInput keys: ${Object.keys(toolUseBlock.input || {}).join(", ")}\n\nInput preview:\n${inputPreview}\n\nIssues:\n${issuesJson.slice(0, 2000)}`;
+      console.error("[/api/plan] Zod validation failed:", JSON.stringify(issues, null, 2));
 
       await supabase
         .from("studio_prompts")
         .update({
           status: "plan_rejected",
-          notes: notesContent,
+          notes: `Validation failed.\n${JSON.stringify(issues).slice(0, 2000)}`,
         })
         .eq("id", promptId);
 
       return NextResponse.json(
-        {
-          error: "ScenePlan validation failed",
-          promptId,
-          issues,
-        },
+        { error: "ScenePlan validation failed", promptId, issues },
         { status: 500 }
       );
+    }
+
+    // Ensure template field is set in meta
+    const planData = parsed.data as any;
+    if (!planData.meta.template) {
+      planData.meta.template = effectiveTemplateId;
     }
 
     // Save valid plan
     const { error: updateError } = await supabase
       .from("studio_prompts")
       .update({
-        scene_plan: parsed.data,
+        scene_plan: planData,
         status: "plan_ready",
       })
       .eq("id", promptId);
@@ -196,10 +203,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
-      promptId,
-      scenePlan: parsed.data,
-    });
+    return NextResponse.json({ promptId, scenePlan: planData });
   } catch (error) {
     console.error("[/api/plan] Unhandled error:", error);
 
@@ -209,7 +213,7 @@ export async function POST(request: NextRequest) {
           .from("studio_prompts")
           .update({
             status: "plan_rejected",
-            notes: `Unhandled error: ${error instanceof Error ? error.message : "Unknown"}\n\nStack: ${error instanceof Error ? error.stack?.slice(0, 1000) : "N/A"}`,
+            notes: `Unhandled error: ${error instanceof Error ? error.message : "Unknown"}`,
           })
           .eq("id", promptId);
       } catch {
@@ -218,12 +222,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      {
-        error:
-          "Server error: " +
-          (error instanceof Error ? error.message : "Unknown"),
-        promptId,
-      },
+      { error: "Server error: " + (error instanceof Error ? error.message : "Unknown"), promptId },
       { status: 500 }
     );
   }
